@@ -125,6 +125,124 @@ const (
 	ProofZKReplay         ProofTier = "zk-replay"
 )
 
+type RuntimeDescriptor struct {
+	Name                  string                `json:"name"`
+	Version               string                `json:"version"`
+	ExecutionSecurityTier ExecutionSecurityTier `json:"execution_security_tier,omitempty"`
+	ProofTier             ProofTier             `json:"proof_tier,omitempty"`
+	ImageDigest           string                `json:"image_digest,omitempty"`
+	RootFSDigest          string                `json:"rootfs_digest,omitempty"`
+}
+
+func (d RuntimeDescriptor) ExecutorRef(defaultProvider string) ExecutorRef {
+	provider := d.Name
+	if provider == "" {
+		provider = defaultProvider
+	}
+	version := d.Version
+	if version == "" {
+		version = "dev"
+	}
+	return ExecutorRef{
+		Provider:              provider,
+		Version:               version,
+		ExecutionSecurityTier: d.ExecutionSecurityTier,
+		ProofTier:             d.ProofTier,
+		ImageDigest:           d.ImageDigest,
+		RootFSDigest:          d.RootFSDigest,
+	}
+}
+
+type ExecutorRef struct {
+	Provider              string                `json:"provider"`
+	Version               string                `json:"version"`
+	ExecutionSecurityTier ExecutionSecurityTier `json:"execution_security_tier,omitempty"`
+	ProofTier             ProofTier             `json:"proof_tier,omitempty"`
+	ImageDigest           string                `json:"image_digest,omitempty"`
+	RootFSDigest          string                `json:"rootfs_digest,omitempty"`
+}
+
+func (e ExecutorRef) ValidateForProof() error {
+	var errs []error
+	if e.Provider == "" {
+		errs = append(errs, errors.New("executor.provider is required"))
+	}
+	if e.Version == "" {
+		errs = append(errs, errors.New("executor.version is required"))
+	}
+	if e.ExecutionSecurityTier == "" {
+		errs = append(errs, errors.New("executor.execution_security_tier is required"))
+	}
+	if e.ProofTier == "" {
+		errs = append(errs, errors.New("executor.proof_tier is required"))
+	}
+	if e.ExecutionSecurityTier != "" && e.ExecutionSecurityTier != ExecutionTrustedNative && e.ExecutionSecurityTier != ExecutionWASMCapability {
+		if e.ImageDigest == "" {
+			errs = append(errs, errors.New("executor.image_digest is required for non-native executor"))
+		}
+		if e.RootFSDigest == "" {
+			errs = append(errs, errors.New("executor.rootfs_digest is required for non-native executor"))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (e ExecutorRef) RequiresAttestation() bool {
+	switch e.ExecutionSecurityTier {
+	case ExecutionConfidentialCPU, ExecutionConfidentialGPU:
+		return true
+	}
+	switch e.ProofTier {
+	case ProofAttestedReceipt, ProofAttestedQuorum:
+		return true
+	default:
+		return false
+	}
+}
+
+type ResourceUsage struct {
+	CPUMillis      int64  `json:"cpu_millis,omitempty"`
+	GPUMillis      int64  `json:"gpu_millis,omitempty"`
+	MaxMemoryBytes int64  `json:"max_memory_bytes,omitempty"`
+	NetworkRxBytes int64  `json:"network_rx_bytes,omitempty"`
+	NetworkTxBytes int64  `json:"network_tx_bytes,omitempty"`
+	WorkspaceBytes int64  `json:"workspace_bytes,omitempty"`
+	OutputBytes    int64  `json:"output_bytes,omitempty"`
+	LimitHit       string `json:"limit_hit,omitempty"`
+}
+
+type ResourceLimits struct {
+	CPUPercent         int   `json:"cpu_percent,omitempty"`
+	MemoryBytes        int64 `json:"memory_bytes,omitempty"`
+	WorkspaceBytes     int64 `json:"workspace_bytes,omitempty"`
+	RuntimeSeconds     int   `json:"runtime_seconds,omitempty"`
+	NetworkEgressBytes int64 `json:"network_egress_bytes,omitempty"`
+	OutputBytes        int64 `json:"output_bytes,omitempty"`
+}
+
+func (l ResourceLimits) Validate() error {
+	var errs []error
+	if l.CPUPercent < 0 {
+		errs = append(errs, errors.New("cpu_percent cannot be negative"))
+	}
+	if l.MemoryBytes < 0 {
+		errs = append(errs, errors.New("memory_bytes cannot be negative"))
+	}
+	if l.WorkspaceBytes < 0 {
+		errs = append(errs, errors.New("workspace_bytes cannot be negative"))
+	}
+	if l.RuntimeSeconds < 0 {
+		errs = append(errs, errors.New("runtime_seconds cannot be negative"))
+	}
+	if l.NetworkEgressBytes < 0 {
+		errs = append(errs, errors.New("network_egress_bytes cannot be negative"))
+	}
+	if l.OutputBytes < 0 {
+		errs = append(errs, errors.New("output_bytes cannot be negative"))
+	}
+	return errors.Join(errs...)
+}
+
 type NetworkMode string
 
 const (
