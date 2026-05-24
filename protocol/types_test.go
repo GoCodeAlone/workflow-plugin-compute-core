@@ -47,6 +47,48 @@ func TestProviderUpstreamImagePolicyRequiresRecommendedImageUnlessOperatorSuppli
 	}
 }
 
+func TestProviderUpstreamClientRequirementRejectsControlWhitespaceLists(t *testing.T) {
+	req := protocol.ProviderUpstreamClientRequirement{
+		ProtocolVersion:       protocol.Version,
+		PluginID:              "workflow-plugin-crypto",
+		ProviderID:            "ethereum-full-node",
+		ContractID:            "ethereum-full-node.v1",
+		Version:               "v1.0.0",
+		RuntimeProfileID:      "sandboxed-container-runtime",
+		ConformanceProfile:    "upstream-client-v1",
+		DefaultConformance:    protocol.UpstreamClientConformanceShapeOnly,
+		RealClientConformance: protocol.UpstreamClientConformanceRealClient,
+		UpstreamClientName:    "geth",
+		VersionProbeCommand:   []string{"geth version"},
+		ImagePolicy: protocol.ProviderUpstreamImagePolicy{
+			DigestPinnedImageRequired: true,
+			RecommendedImageRef:       "ethereum/client-go@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		RequiredEvidence: []string{"artifact://provider/evidence"},
+		Notes:            []string{"operator may provide a digest-pinned image"},
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("requirement invalid: %v", err)
+	}
+
+	req.VersionProbeCommand = []string{"geth\nversion"}
+	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "version_probe_command") {
+		t.Fatalf("expected version_probe_command error, got %v", err)
+	}
+	req.VersionProbeCommand = []string{"geth version"}
+
+	req.RequiredEvidence = []string{""}
+	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "required_evidence") {
+		t.Fatalf("expected required_evidence error, got %v", err)
+	}
+	req.RequiredEvidence = []string{"artifact://provider/evidence"}
+
+	req.Notes = []string{" "}
+	if err := req.Validate(); err == nil || !strings.Contains(err.Error(), "notes") {
+		t.Fatalf("expected notes error, got %v", err)
+	}
+}
+
 func TestProviderRuntimeProfileRejectsReusableResidueWithoutWorkspace(t *testing.T) {
 	contract := validBatchProviderContract()
 	profile := &contract.RuntimeContract.Profiles[0]
