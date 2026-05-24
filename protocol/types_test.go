@@ -15,6 +15,78 @@ func TestProviderContractAcceptsBatchSandboxedOCI(t *testing.T) {
 	}
 }
 
+func TestRuntimeDescriptorProducesExecutorRef(t *testing.T) {
+	descriptor := protocol.RuntimeDescriptor{
+		Name:                  "sandboxed-command",
+		Version:               "v1.2.3",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+		ImageDigest:           "sha256:image",
+		RootFSDigest:          "sha256:rootfs",
+	}
+
+	ref := descriptor.ExecutorRef("fallback")
+
+	if ref.Provider != "sandboxed-command" || ref.Version != "v1.2.3" {
+		t.Fatalf("executor identity = %+v", ref)
+	}
+	if ref.ExecutionSecurityTier != protocol.ExecutionSandboxedContainer || ref.ProofTier != protocol.ProofArtifactHash {
+		t.Fatalf("executor proof metadata = %+v", ref)
+	}
+	if ref.ImageDigest != "sha256:image" || ref.RootFSDigest != "sha256:rootfs" {
+		t.Fatalf("executor digests = %+v", ref)
+	}
+}
+
+func TestRuntimeDescriptorFallsBackToProviderNameAndDevVersion(t *testing.T) {
+	ref := (protocol.RuntimeDescriptor{}).ExecutorRef("command")
+
+	if ref.Provider != "command" || ref.Version != "dev" {
+		t.Fatalf("fallback executor ref = %+v", ref)
+	}
+}
+
+func TestExecutorRefValidateForProofRequiresDigestsForNonNativeExecutors(t *testing.T) {
+	ref := protocol.ExecutorRef{
+		Provider:              "sandboxed-command",
+		Version:               "dev",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+	}
+
+	err := ref.ValidateForProof()
+	if err == nil {
+		t.Fatal("expected non-native executor without image digests to fail")
+	}
+	if !strings.Contains(err.Error(), "image_digest") || !strings.Contains(err.Error(), "rootfs_digest") {
+		t.Fatalf("expected digest errors, got %v", err)
+	}
+
+	ref.ImageDigest = "sha256:image"
+	ref.RootFSDigest = "sha256:rootfs"
+	if err := ref.ValidateForProof(); err != nil {
+		t.Fatalf("executor ref invalid with digests: %v", err)
+	}
+}
+
+func TestResourceLimitsRejectNegativeValues(t *testing.T) {
+	limits := protocol.ResourceLimits{
+		CPUPercent:     -1,
+		RuntimeSeconds: -1,
+		OutputBytes:    -1,
+	}
+
+	err := limits.Validate()
+	if err == nil {
+		t.Fatal("expected negative resource limits to fail")
+	}
+	if !strings.Contains(err.Error(), "cpu_percent") ||
+		!strings.Contains(err.Error(), "runtime_seconds") ||
+		!strings.Contains(err.Error(), "output_bytes") {
+		t.Fatalf("expected resource limit errors, got %v", err)
+	}
+}
+
 func TestProviderContractRejectsMalformedConfigSchemaDigest(t *testing.T) {
 	contract := validBatchProviderContract()
 	contract.ConfigSchemaDigest = "sha256:not-hex"
