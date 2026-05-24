@@ -125,6 +125,22 @@ const (
 	ProofZKReplay         ProofTier = "zk-replay"
 )
 
+type RuntimeAdapterKind string
+
+const (
+	RuntimeAdapterExecution      RuntimeAdapterKind = "execution"
+	RuntimeAdapterServiceRun     RuntimeAdapterKind = "service-run"
+	RuntimeAdapterServiceSession RuntimeAdapterKind = "service-session"
+)
+
+type RuntimeWorkspacePolicy string
+
+const (
+	RuntimeWorkspaceUnavailable RuntimeWorkspacePolicy = "unavailable"
+	RuntimeWorkspaceOptional    RuntimeWorkspacePolicy = "optional"
+	RuntimeWorkspaceRequired    RuntimeWorkspacePolicy = "required"
+)
+
 type RuntimeDescriptor struct {
 	Name                  string                `json:"name"`
 	Version               string                `json:"version"`
@@ -132,6 +148,37 @@ type RuntimeDescriptor struct {
 	ProofTier             ProofTier             `json:"proof_tier,omitempty"`
 	ImageDigest           string                `json:"image_digest,omitempty"`
 	RootFSDigest          string                `json:"rootfs_digest,omitempty"`
+}
+
+func (d RuntimeDescriptor) Validate() error {
+	var errs []error
+	if err := validateIdentifier("name", d.Name); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(d.Version) == "" {
+		errs = append(errs, errors.New("version is required"))
+	} else if strings.ContainsAny(d.Version, " \t\r\n\x00") {
+		errs = append(errs, errors.New("version must not contain whitespace"))
+	}
+	if !validExecutionSecurityTier(d.ExecutionSecurityTier) {
+		errs = append(errs, fmt.Errorf("execution_security_tier %q is unsupported", d.ExecutionSecurityTier))
+	}
+	if !validProofTier(d.ProofTier) {
+		errs = append(errs, fmt.Errorf("proof_tier %q is unsupported", d.ProofTier))
+	}
+	if d.ExecutionSecurityTier != ExecutionTrustedNative && d.ExecutionSecurityTier != ExecutionWASMCapability {
+		if d.ImageDigest == "" {
+			errs = append(errs, errors.New("image_digest is required for non-native runtime"))
+		} else if !validSHA256Ref(d.ImageDigest) {
+			errs = append(errs, errors.New("image_digest must be sha256:<64 hex chars>"))
+		}
+		if d.RootFSDigest == "" {
+			errs = append(errs, errors.New("rootfs_digest is required for non-native runtime"))
+		} else if !validSHA256Ref(d.RootFSDigest) {
+			errs = append(errs, errors.New("rootfs_digest must be sha256:<64 hex chars>"))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (d RuntimeDescriptor) ExecutorRef(defaultProvider string) ExecutorRef {
@@ -284,6 +331,118 @@ func (r RuntimeExecutionRequest) Validate() error {
 		errs = append(errs, fmt.Errorf("resource_limits: %w", err))
 	}
 	return errors.Join(errs...)
+}
+
+type RuntimeAdapterContract struct {
+	ProtocolVersion     string                 `json:"protocol_version"`
+	AdapterID           string                 `json:"adapter_id"`
+	Descriptor          RuntimeDescriptor      `json:"descriptor,omitzero"`
+	Kinds               []RuntimeAdapterKind   `json:"kinds"`
+	WorkloadKinds       []WorkloadKind         `json:"workload_kinds"`
+	RuntimeProfiles     []RuntimeProfile       `json:"runtime_profiles,omitempty"`
+	WorkspacePolicy     RuntimeWorkspacePolicy `json:"workspace_policy"`
+	ConformanceProfiles []string               `json:"conformance_profiles"`
+	ResiduePolicy       ResiduePolicy          `json:"residue_policy,omitzero"`
+	ProviderConfig      ProviderConfig         `json:"provider_config,omitzero"`
+	Metadata            map[string]string      `json:"metadata,omitempty"`
+}
+
+func (c RuntimeAdapterContract) Validate() error {
+	var errs []error
+	if c.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if err := validateIdentifier("adapter_id", c.AdapterID); err != nil {
+		errs = append(errs, err)
+	}
+	if err := c.Descriptor.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("descriptor: %w", err))
+	}
+	if len(c.Kinds) == 0 {
+		errs = append(errs, errors.New("kinds is required"))
+	}
+	seenKinds := map[RuntimeAdapterKind]struct{}{}
+	for i, kind := range c.Kinds {
+		if !validRuntimeAdapterKind(kind) {
+			errs = append(errs, fmt.Errorf("kinds[%d] %q is unsupported", i, kind))
+			continue
+		}
+		if _, exists := seenKinds[kind]; exists {
+			errs = append(errs, fmt.Errorf("kinds[%d] %q is duplicated", i, kind))
+		}
+		seenKinds[kind] = struct{}{}
+	}
+	if len(c.WorkloadKinds) == 0 {
+		errs = append(errs, errors.New("workload_kinds is required"))
+	}
+	seenWorkloads := map[WorkloadKind]struct{}{}
+	for i, kind := range c.WorkloadKinds {
+		if !validWorkloadKind(kind) {
+			errs = append(errs, fmt.Errorf("workload_kinds[%d] %q is unsupported", i, kind))
+			continue
+		}
+		if _, exists := seenWorkloads[kind]; exists {
+			errs = append(errs, fmt.Errorf("workload_kinds[%d] %q is duplicated", i, kind))
+		}
+		seenWorkloads[kind] = struct{}{}
+	}
+	if c.SupportsAdapterKind(RuntimeAdapterServiceRun) || c.SupportsAdapterKind(RuntimeAdapterServiceSession) {
+		if !c.Supports(WorkloadService) && !c.Supports(WorkloadNodeService) {
+			errs = append(errs, errors.New("service adapter kinds require service workload kind"))
+		}
+	}
+	for i, profile := range c.RuntimeProfiles {
+		if !validRuntimeProfile(profile) {
+			errs = append(errs, fmt.Errorf("runtime_profiles[%d] %q is unsupported", i, profile))
+		}
+	}
+	if !validRuntimeWorkspacePolicy(c.WorkspacePolicy) {
+		errs = append(errs, fmt.Errorf("workspace_policy %q is unsupported", c.WorkspacePolicy))
+	}
+	if len(c.ConformanceProfiles) == 0 {
+		errs = append(errs, errors.New("conformance_profiles is required"))
+	}
+	seenProfiles := map[string]struct{}{}
+	for i, profile := range c.ConformanceProfiles {
+		if err := validateIdentifier(fmt.Sprintf("conformance_profiles[%d]", i), profile); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, exists := seenProfiles[profile]; exists {
+			errs = append(errs, fmt.Errorf("conformance_profiles[%d] %q is duplicated", i, profile))
+		}
+		seenProfiles[profile] = struct{}{}
+	}
+	if err := c.ResiduePolicy.Validate(ResiduePolicyValidation{RequirePolicyHash: true}); err != nil {
+		errs = append(errs, fmt.Errorf("residue_policy: %w", err))
+	}
+	if err := c.ProviderConfig.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("provider_config: %w", err))
+	}
+	for key := range c.Metadata {
+		if err := validateIdentifier("metadata key", key); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (c RuntimeAdapterContract) Supports(kind WorkloadKind) bool {
+	for _, supported := range c.WorkloadKinds {
+		if supported == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func (c RuntimeAdapterContract) SupportsAdapterKind(kind RuntimeAdapterKind) bool {
+	for _, supported := range c.Kinds {
+		if supported == kind {
+			return true
+		}
+	}
+	return false
 }
 
 const MaxRuntimeResultPreviewBytes = 16 * 1024
@@ -1932,6 +2091,24 @@ func validProofTier(tier ProofTier) bool {
 		ProofAttestedReceipt,
 		ProofAttestedQuorum,
 		ProofZKReplay:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimeAdapterKind(kind RuntimeAdapterKind) bool {
+	switch kind {
+	case RuntimeAdapterExecution, RuntimeAdapterServiceRun, RuntimeAdapterServiceSession:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimeWorkspacePolicy(policy RuntimeWorkspacePolicy) bool {
+	switch policy {
+	case RuntimeWorkspaceUnavailable, RuntimeWorkspaceOptional, RuntimeWorkspaceRequired:
 		return true
 	default:
 		return false

@@ -144,6 +144,89 @@ func TestRuntimeServiceResultValidatesStatusEvidenceHashes(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdapterContractValidatesHostIndependentBoundary(t *testing.T) {
+	contract := protocol.RuntimeAdapterContract{
+		ProtocolVersion: protocol.Version,
+		AdapterID:       "sandboxed-command",
+		Descriptor: protocol.RuntimeDescriptor{
+			Name:                  "sandboxed-command",
+			Version:               "v1.2.3",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+			ImageDigest:           protocol.CanonicalHash("image"),
+			RootFSDigest:          protocol.CanonicalHash("rootfs"),
+		},
+		Kinds:               []protocol.RuntimeAdapterKind{protocol.RuntimeAdapterExecution},
+		WorkloadKinds:       []protocol.WorkloadKind{protocol.WorkloadCommand, protocol.WorkloadContainerBuild},
+		RuntimeProfiles:     []protocol.RuntimeProfile{protocol.RuntimeProfileSandboxedOCI},
+		WorkspacePolicy:     protocol.RuntimeWorkspaceRequired,
+		ConformanceProfiles: []string{"protected-command-v1"},
+		ResiduePolicy: protocol.ResiduePolicy{
+			Mode:          protocol.ResidueModeProviderBound,
+			PolicyHash:    protocol.CanonicalHash("residue"),
+			MaxReuseCount: 2,
+		},
+	}
+
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("adapter contract invalid: %v", err)
+	}
+}
+
+func TestRuntimeAdapterContractRejectsAmbiguousRuntimeBoundary(t *testing.T) {
+	contract := protocol.RuntimeAdapterContract{
+		ProtocolVersion: "wrong",
+		AdapterID:       "bad adapter",
+		Descriptor: protocol.RuntimeDescriptor{
+			Name:                  "adapter",
+			Version:               "v1.0.0",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+		},
+		Kinds:           []protocol.RuntimeAdapterKind{protocol.RuntimeAdapterExecution, protocol.RuntimeAdapterExecution},
+		WorkloadKinds:   []protocol.WorkloadKind{protocol.WorkloadKind("unknown")},
+		WorkspacePolicy: protocol.RuntimeWorkspacePolicy("maybe"),
+		ResiduePolicy: protocol.ResiduePolicy{
+			Mode:       protocol.ResidueModeSessionBound,
+			SessionKey: "session",
+		},
+	}
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected malformed adapter contract to fail")
+	}
+	for _, want := range []string{"protocol_version", "adapter_id", "descriptor", "kinds", "workload_kinds", "workspace_policy", "conformance_profiles", "residue_policy"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in error, got %v", want, err)
+		}
+	}
+}
+
+func TestRuntimeAdapterContractRequiresServiceWorkloadForServiceAdapters(t *testing.T) {
+	contract := protocol.RuntimeAdapterContract{
+		ProtocolVersion: protocol.Version,
+		AdapterID:       "service-adapter",
+		Descriptor: protocol.RuntimeDescriptor{
+			Name:                  "service-adapter",
+			Version:               "v1.0.0",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+			ImageDigest:           protocol.CanonicalHash("image"),
+			RootFSDigest:          protocol.CanonicalHash("rootfs"),
+		},
+		Kinds:               []protocol.RuntimeAdapterKind{protocol.RuntimeAdapterServiceSession},
+		WorkloadKinds:       []protocol.WorkloadKind{protocol.WorkloadCommand},
+		WorkspacePolicy:     protocol.RuntimeWorkspaceOptional,
+		ConformanceProfiles: []string{"service-session-v1"},
+	}
+
+	err := contract.Validate()
+	if err == nil || !strings.Contains(err.Error(), "service adapter kinds require service workload kind") {
+		t.Fatalf("expected service workload error, got %v", err)
+	}
+}
+
 func TestRuntimeDescriptorFallsBackToProviderNameAndDevVersion(t *testing.T) {
 	ref := (protocol.RuntimeDescriptor{}).ExecutorRef("command")
 
