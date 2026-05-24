@@ -13,23 +13,84 @@ const Version = "compute.v1alpha1"
 
 type NetworkOperatingMode string
 
-const NetworkModeNodeService NetworkOperatingMode = "node-service"
+const (
+	NetworkModeBatch        NetworkOperatingMode = "batch"
+	NetworkModeWarmService  NetworkOperatingMode = "warm-service"
+	NetworkModeNodeService  NetworkOperatingMode = "node-service"
+	NetworkModeInferenceAPI NetworkOperatingMode = "inference-api"
+)
+
+type WorkloadKind string
+
+const (
+	WorkloadCommand            WorkloadKind = "command"
+	WorkloadContainerBuild     WorkloadKind = "container-build"
+	WorkloadDockerComposeBuild WorkloadKind = "docker-compose-build"
+	WorkloadBenchmark          WorkloadKind = "benchmark"
+	WorkloadTraining           WorkloadKind = "training"
+	WorkloadService            WorkloadKind = "service"
+	WorkloadNodeService        WorkloadKind = "node-service"
+	WorkloadContentCache       WorkloadKind = "content-cache"
+	WorkloadSupervisor         WorkloadKind = "supervisor"
+	WorkloadProductCapture     WorkloadKind = "product-capture"
+	WorkloadProvider           WorkloadKind = "provider"
+	WorkloadWASMComponent      WorkloadKind = "wasm-component"
+)
 
 type RuntimeProfile string
 
-const RuntimeProfileServiceOCI RuntimeProfile = "service-oci-v1"
+const (
+	RuntimeProfileSandboxedOCI   RuntimeProfile = "sandboxed-oci-v1"
+	RuntimeProfileContainerBuild RuntimeProfile = "container-build-v1"
+	RuntimeProfileServiceOCI     RuntimeProfile = "service-oci-v1"
+	RuntimeProfileWASMComponent  RuntimeProfile = "wasm-component-v1"
+	RuntimeProfileBrowserWorker  RuntimeProfile = "browser-worker-wasm-v1"
+)
 
 type ContainerRuntimeTool string
 
 const (
-	ContainerRuntimePodman  ContainerRuntimeTool = "podman"
-	ContainerRuntimeDocker  ContainerRuntimeTool = "docker"
-	ContainerRuntimeNerdctl ContainerRuntimeTool = "nerdctl"
+	ContainerRuntimePodman         ContainerRuntimeTool = "podman"
+	ContainerRuntimeDocker         ContainerRuntimeTool = "docker"
+	ContainerRuntimeNerdctl        ContainerRuntimeTool = "nerdctl"
+	ContainerRuntimeAppleContainer ContainerRuntimeTool = "apple-container"
 )
 
 type RuntimePermission string
 
-const RuntimePermissionForbidden RuntimePermission = "forbidden"
+const (
+	RuntimePermissionForbidden RuntimePermission = "forbidden"
+	RuntimePermissionExplicit  RuntimePermission = "explicit"
+	RuntimePermissionAllowed   RuntimePermission = "allowed"
+)
+
+type ResidueMode string
+
+const (
+	ResidueModeIsolated      ResidueMode = "isolated"
+	ResidueModeNone          ResidueMode = "none"
+	ResidueModeProviderBound ResidueMode = "provider-bound"
+	ResidueModeWorkerBound   ResidueMode = "worker-bound"
+	ResidueModeSessionBound  ResidueMode = "session-bound"
+)
+
+type ResiduePolicy struct {
+	Mode                ResidueMode   `json:"mode,omitempty"`
+	AllowedModes        []ResidueMode `json:"allowed_modes,omitempty"`
+	SessionKey          string        `json:"session_key,omitempty"`
+	PolicyHash          string        `json:"policy_hash,omitempty"`
+	MaxAgeSeconds       int           `json:"max_age_seconds,omitempty"`
+	MaxReuseCount       int           `json:"max_reuse_count,omitempty"`
+	WipeOnFailure       bool          `json:"wipe_on_failure,omitempty"`
+	ExplicitWorkerBound bool          `json:"explicit_worker_bound,omitempty"`
+}
+
+type ResiduePolicyValidation struct {
+	NoWorkspaceAllowed         bool
+	RequireSessionKey          bool
+	RequireExplicitWorkerBound bool
+	RequirePolicyHash          bool
+}
 
 type UpstreamClientConformance string
 
@@ -40,7 +101,10 @@ const (
 
 type ExecutionSecurityTier string
 
-const ExecutionSandboxedContainer ExecutionSecurityTier = "sandboxed-container"
+const (
+	ExecutionSandboxedContainer ExecutionSecurityTier = "sandboxed-container"
+	ExecutionWASMCapability     ExecutionSecurityTier = "wasm-capability"
+)
 
 type ProofTier string
 
@@ -66,11 +130,12 @@ type SessionPolicy struct {
 }
 
 type ProviderConfig struct {
-	PluginID   string `json:"plugin_id,omitempty"`
-	ProviderID string `json:"provider_id,omitempty"`
-	ContractID string `json:"contract_id,omitempty"`
-	Version    string `json:"version,omitempty"`
-	ConfigRef  string `json:"config_ref,omitempty"`
+	PluginID     string `json:"plugin_id,omitempty"`
+	ProviderID   string `json:"provider_id,omitempty"`
+	ContractID   string `json:"contract_id,omitempty"`
+	Version      string `json:"version,omitempty"`
+	ConfigRef    string `json:"config_ref,omitempty"`
+	ConfigDigest string `json:"config_digest,omitempty"`
 }
 
 type ProviderContract struct {
@@ -114,8 +179,36 @@ func (c ProviderContract) Validate() error {
 	if c.ProtocolVersion != Version {
 		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
 	}
-	if len(c.OperatingModes) == 0 || len(c.WorkloadKinds) == 0 || len(c.ExecutorProviders) == 0 || len(c.ExecutionSecurityTiers) == 0 || len(c.ProofTiers) == 0 || len(c.NetworkModes) == 0 {
-		errs = append(errs, errors.New("provider contract capability lists are required"))
+	if c.ConfigSchemaDigest != "" && !validSHA256Ref(c.ConfigSchemaDigest) {
+		errs = append(errs, errors.New("config_schema_digest must be sha256:<64 hex chars>"))
+	}
+	if len(c.OperatingModes) == 0 {
+		errs = append(errs, errors.New("operating_modes is required"))
+	}
+	for i, mode := range c.OperatingModes {
+		if !validNetworkOperatingMode(mode) {
+			errs = append(errs, fmt.Errorf("operating_modes[%d] %q is unsupported", i, mode))
+		}
+	}
+	if len(c.WorkloadKinds) == 0 {
+		errs = append(errs, errors.New("workload_kinds is required"))
+	}
+	for i, kind := range c.WorkloadKinds {
+		if !validWorkloadKind(WorkloadKind(strings.TrimSpace(kind))) {
+			errs = append(errs, fmt.Errorf("workload_kinds[%d] %q is unknown", i, kind))
+		}
+	}
+	if len(c.ExecutorProviders) == 0 {
+		errs = append(errs, errors.New("executor_providers is required"))
+	}
+	if len(c.ExecutionSecurityTiers) == 0 {
+		errs = append(errs, errors.New("execution_security_tiers is required"))
+	}
+	if len(c.ProofTiers) == 0 {
+		errs = append(errs, errors.New("proof_tiers is required"))
+	}
+	if len(c.NetworkModes) == 0 {
+		errs = append(errs, errors.New("network_modes is required"))
 	}
 	if len(c.RuntimeContract.Profiles) == 0 {
 		errs = append(errs, errors.New("runtime_contract.profiles is required"))
@@ -174,6 +267,21 @@ type ProviderRuntimeProfile struct {
 	ConformanceProfiles       []string                  `json:"conformance_profiles,omitempty"`
 	UpstreamClientConformance UpstreamClientConformance `json:"upstream_client_conformance,omitempty"`
 	HostWorkspaceSupported    bool                      `json:"host_workspace_supported,omitempty"`
+	ResiduePolicy             ResiduePolicy             `json:"residue_policy,omitzero"`
+	WASM                      WASMRuntimeContract       `json:"wasm,omitzero"`
+}
+
+type WASMRuntimeContract struct {
+	ABI               string            `json:"abi"`
+	ComponentRef      string            `json:"component_ref"`
+	ComponentDigest   string            `json:"component_digest"`
+	Features          []string          `json:"features,omitempty"`
+	MaxMemoryBytes    int64             `json:"max_memory_bytes,omitempty"`
+	MaxRuntimeSeconds int               `json:"max_runtime_seconds,omitempty"`
+	Filesystem        RuntimePermission `json:"filesystem"`
+	Network           RuntimePermission `json:"network"`
+	NativeHostUpdates RuntimePermission `json:"native_host_updates,omitempty"`
+	BrowserWorker     bool              `json:"browser_worker,omitempty"`
 }
 
 func (p ProviderRuntimeProfile) Validate() error {
@@ -181,20 +289,52 @@ func (p ProviderRuntimeProfile) Validate() error {
 	if p.ID == "" {
 		errs = append(errs, errors.New("id is required"))
 	}
-	if p.RuntimeProfile != RuntimeProfileServiceOCI {
+	if !validRuntimeProfile(p.RuntimeProfile) {
 		errs = append(errs, fmt.Errorf("runtime_profile %q is unsupported", p.RuntimeProfile))
 	}
 	if p.ExecutorProvider == "" {
 		errs = append(errs, errors.New("executor_provider is required"))
 	}
-	if p.ExecutionSecurityTier != ExecutionSandboxedContainer {
+	if !validExecutionSecurityTier(p.ExecutionSecurityTier) {
 		errs = append(errs, fmt.Errorf("execution_security_tier %q is unsupported", p.ExecutionSecurityTier))
 	}
 	if p.ProofTier != ProofArtifactHash {
 		errs = append(errs, fmt.Errorf("proof_tier %q is unsupported", p.ProofTier))
 	}
-	if !p.ImageDigestRequired || !p.RootFSDigestRequired {
-		errs = append(errs, errors.New("image and rootfs digests are required"))
+	if err := p.ResiduePolicy.Validate(ResiduePolicyValidation{
+		NoWorkspaceAllowed: !p.HostWorkspaceSupported,
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("residue_policy: %w", err))
+	}
+	if p.RuntimeProfile == RuntimeProfileWASMComponent || p.RuntimeProfile == RuntimeProfileBrowserWorker {
+		if p.HostWorkspaceSupported {
+			errs = append(errs, errors.New("host workspace must be unsupported for wasm runtime profiles"))
+		}
+		if p.ExecutionSecurityTier != ExecutionWASMCapability {
+			errs = append(errs, errors.New("wasm runtime_profile requires execution_security_tier wasm-capability"))
+		}
+		if p.ImageDigestRequired || p.RootFSDigestRequired {
+			errs = append(errs, errors.New("image and rootfs digests must be disabled for wasm runtime profiles"))
+		}
+		if len(p.AllowedRuntimeTools) != 0 || len(p.AllowedMountRefs) != 0 || len(p.WritablePaths) != 0 {
+			errs = append(errs, errors.New("container runtime tools, mounts, and writable paths must be empty for wasm runtime profiles"))
+		}
+		if err := p.WASM.Validate(p.RuntimeProfile); err != nil {
+			errs = append(errs, fmt.Errorf("wasm: %w", err))
+		}
+	} else {
+		if p.ExecutionSecurityTier == ExecutionWASMCapability {
+			errs = append(errs, errors.New("execution_security_tier wasm-capability requires wasm runtime_profile"))
+		}
+		if len(p.AllowedRuntimeTools) == 0 {
+			errs = append(errs, errors.New("allowed_runtime_tools is required"))
+		}
+		if !p.ImageDigestRequired || !p.RootFSDigestRequired {
+			errs = append(errs, errors.New("image and rootfs digests are required"))
+		}
+		if len(p.AllowedMountRefs) == 0 {
+			errs = append(errs, errors.New("allowed_mount_refs is required"))
+		}
 	}
 	for _, permission := range []struct {
 		name  string
@@ -207,11 +347,127 @@ func (p ProviderRuntimeProfile) Validate() error {
 		{"seccomp_disable", p.SeccompDisable},
 		{"no_new_privileges_disable", p.NoNewPrivilegesDisable},
 	} {
-		if permission.value != RuntimePermissionForbidden {
+		if !validRuntimePermission(permission.value) {
+			errs = append(errs, fmt.Errorf("%s %q is unsupported", permission.name, permission.value))
+			continue
+		}
+		if permission.name != "writable_rootfs" && permission.value != RuntimePermissionForbidden {
 			errs = append(errs, fmt.Errorf("%s must be forbidden", permission.name))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (w WASMRuntimeContract) Validate(profile RuntimeProfile) error {
+	var errs []error
+	if strings.TrimSpace(w.ABI) == "" {
+		errs = append(errs, errors.New("abi is required"))
+	}
+	if err := validateComponentRef("component_ref", w.ComponentRef); err != nil {
+		errs = append(errs, err)
+	}
+	if !validSHA256Ref(w.ComponentDigest) {
+		errs = append(errs, errors.New("component_digest must be sha256:<64 hex chars>"))
+	}
+	if w.MaxMemoryBytes <= 0 {
+		errs = append(errs, errors.New("max_memory_bytes must be positive"))
+	}
+	if w.MaxRuntimeSeconds <= 0 {
+		errs = append(errs, errors.New("max_runtime_seconds must be positive"))
+	}
+	if !validRuntimePermission(w.Filesystem) {
+		errs = append(errs, fmt.Errorf("filesystem %q is unsupported", w.Filesystem))
+	}
+	if !validRuntimePermission(w.Network) {
+		errs = append(errs, fmt.Errorf("network %q is unsupported", w.Network))
+	}
+	if w.NativeHostUpdates != "" && !validRuntimePermission(w.NativeHostUpdates) {
+		errs = append(errs, fmt.Errorf("native_host_updates %q is unsupported", w.NativeHostUpdates))
+	}
+	if profile == RuntimeProfileBrowserWorker {
+		if !w.BrowserWorker {
+			errs = append(errs, errors.New("browser_worker must be true for browser worker runtime profile"))
+		}
+		if w.Filesystem != RuntimePermissionForbidden {
+			errs = append(errs, errors.New("filesystem must be forbidden for browser worker runtime profile"))
+		}
+		if w.NativeHostUpdates != "" && w.NativeHostUpdates != RuntimePermissionForbidden {
+			errs = append(errs, errors.New("native_host_updates must be forbidden for browser worker runtime profile"))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (p ResiduePolicy) Validate(v ResiduePolicyValidation) error {
+	var errs []error
+	if !validResidueMode(p.Mode, true) {
+		errs = append(errs, fmt.Errorf("mode %q is unsupported", p.Mode))
+	}
+	seen := map[ResidueMode]struct{}{}
+	for i, mode := range p.AllowedModes {
+		if !validResidueMode(mode, false) {
+			errs = append(errs, fmt.Errorf("allowed_modes[%d] %q is unsupported", i, mode))
+			continue
+		}
+		if _, exists := seen[mode]; exists {
+			errs = append(errs, fmt.Errorf("allowed_modes[%d] %q is duplicated", i, mode))
+		}
+		seen[mode] = struct{}{}
+	}
+	if p.Mode != "" && len(p.AllowedModes) > 0 {
+		if _, exists := seen[p.Mode]; !exists {
+			errs = append(errs, fmt.Errorf("mode %q is not in allowed_modes", p.Mode))
+		}
+	}
+	if v.NoWorkspaceAllowed && p.UsesReusableWorkspace() {
+		errs = append(errs, errors.New("reusable residue requires host workspace support"))
+	}
+	if p.Mode == ResidueModeSessionBound || (v.RequireSessionKey && p.Mode == ResidueModeSessionBound) {
+		if strings.TrimSpace(p.SessionKey) == "" {
+			errs = append(errs, errors.New("session_key is required for session-bound residue"))
+		} else if strings.TrimSpace(p.SessionKey) != p.SessionKey || strings.ContainsAny(p.SessionKey, "\x00\r\n\t") {
+			errs = append(errs, errors.New("session_key must not contain control whitespace or surrounding whitespace"))
+		}
+	}
+	if p.Mode != ResidueModeSessionBound && p.SessionKey != "" {
+		errs = append(errs, errors.New("session_key requires session-bound residue mode"))
+	}
+	if p.Mode == ResidueModeWorkerBound && v.RequireExplicitWorkerBound && !p.ExplicitWorkerBound {
+		errs = append(errs, errors.New("explicit_worker_bound is required for worker-bound residue"))
+	}
+	if p.PolicyHash != "" && !validSHA256Ref(p.PolicyHash) {
+		errs = append(errs, errors.New("policy_hash must be sha256:<64 hex chars>"))
+	}
+	if v.RequirePolicyHash && p.UsesReusableWorkspace() && p.PolicyHash == "" {
+		errs = append(errs, errors.New("policy_hash is required for reusable residue"))
+	}
+	if p.MaxAgeSeconds < 0 {
+		errs = append(errs, errors.New("max_age_seconds must not be negative"))
+	}
+	if p.MaxReuseCount < 0 {
+		errs = append(errs, errors.New("max_reuse_count must not be negative"))
+	}
+	return errors.Join(errs...)
+}
+
+func (p ResiduePolicy) IsZero() bool {
+	return p.Mode == "" &&
+		len(p.AllowedModes) == 0 &&
+		p.SessionKey == "" &&
+		p.PolicyHash == "" &&
+		p.MaxAgeSeconds == 0 &&
+		p.MaxReuseCount == 0 &&
+		!p.WipeOnFailure &&
+		!p.ExplicitWorkerBound
+}
+
+func (p ResiduePolicy) UsesReusableWorkspace() bool {
+	switch p.Mode {
+	case ResidueModeProviderBound, ResidueModeWorkerBound, ResidueModeSessionBound:
+		return true
+	default:
+		return false
+	}
 }
 
 func DefaultProviderRuntimeProfile(executorProvider string, tier ExecutionSecurityTier, proof ProofTier) ProviderRuntimeProfile {
@@ -435,6 +691,98 @@ func CanonicalHash(value any) string {
 	}
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func validNetworkOperatingMode(mode NetworkOperatingMode) bool {
+	switch mode {
+	case NetworkModeBatch, NetworkModeWarmService, NetworkModeNodeService, NetworkModeInferenceAPI:
+		return true
+	default:
+		return false
+	}
+}
+
+func validWorkloadKind(kind WorkloadKind) bool {
+	switch kind {
+	case WorkloadCommand,
+		WorkloadContainerBuild,
+		WorkloadDockerComposeBuild,
+		WorkloadBenchmark,
+		WorkloadTraining,
+		WorkloadService,
+		WorkloadNodeService,
+		WorkloadContentCache,
+		WorkloadSupervisor,
+		WorkloadProductCapture,
+		WorkloadProvider,
+		WorkloadWASMComponent:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimeProfile(profile RuntimeProfile) bool {
+	switch profile {
+	case RuntimeProfileSandboxedOCI, RuntimeProfileContainerBuild, RuntimeProfileServiceOCI, RuntimeProfileWASMComponent, RuntimeProfileBrowserWorker:
+		return true
+	default:
+		return false
+	}
+}
+
+func validExecutionSecurityTier(tier ExecutionSecurityTier) bool {
+	switch tier {
+	case ExecutionSandboxedContainer, ExecutionWASMCapability:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimePermission(permission RuntimePermission) bool {
+	switch permission {
+	case RuntimePermissionForbidden, RuntimePermissionExplicit, RuntimePermissionAllowed:
+		return true
+	default:
+		return false
+	}
+}
+
+func validResidueMode(mode ResidueMode, allowEmpty bool) bool {
+	switch mode {
+	case "":
+		return allowEmpty
+	case ResidueModeIsolated, ResidueModeNone, ResidueModeProviderBound, ResidueModeWorkerBound, ResidueModeSessionBound:
+		return true
+	default:
+		return false
+	}
+}
+
+func validSHA256Ref(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	hexPart := strings.TrimPrefix(value, "sha256:")
+	if len(hexPart) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(hexPart)
+	return err == nil
+}
+
+func validateComponentRef(name, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	for _, prefix := range []string{"artifact://", "content://", "provider://"} {
+		if strings.HasPrefix(value, prefix) && !strings.ContainsAny(value, " \t\r\n\x00") {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s must use artifact://, content://, or provider:// ref", name)
 }
 
 func contains[T comparable](values []T, want T) bool {
