@@ -28,6 +28,25 @@ func TestProviderContractRejectsMalformedConfigSchemaDigest(t *testing.T) {
 	}
 }
 
+func TestProviderUpstreamImagePolicyRequiresRecommendedImageUnlessOperatorSupplied(t *testing.T) {
+	policy := protocol.ProviderUpstreamImagePolicy{
+		DigestPinnedImageRequired: true,
+	}
+
+	err := policy.Validate()
+	if err == nil {
+		t.Fatal("expected missing recommended image to fail")
+	}
+	if !strings.Contains(err.Error(), "recommended_image_ref") {
+		t.Fatalf("expected recommended_image_ref error, got %v", err)
+	}
+
+	policy.OperatorSuppliedImageRequired = true
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("operator-supplied image should not require recommended image: %v", err)
+	}
+}
+
 func TestProviderRuntimeProfileRejectsReusableResidueWithoutWorkspace(t *testing.T) {
 	contract := validBatchProviderContract()
 	profile := &contract.RuntimeContract.Profiles[0]
