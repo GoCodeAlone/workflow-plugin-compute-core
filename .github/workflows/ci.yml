@@ -29,9 +29,6 @@ jobs:
           go-version-file: go.mod
       - uses: GoCodeAlone/setup-wfctl@v1
         with:
-          version: v0.62.0
-      # workflow#762: scaffold carries type="scaffold" + TEMPLATE.* placeholders.
-      # Old `plugin validate --strict-contracts` (wfctl v0.20.1) rejects both;
-      # validate-contract (v0.62.0) checks scaffold-compatible contract surface.
-      - name: Validate plugin contract (scaffold-aware)
+          version: v0.63.1
+      - name: Validate plugin contract
         run: wfctl plugin validate-contract .

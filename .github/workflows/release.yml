@@ -42,10 +42,10 @@ jobs:
         run: |
           RUNNER_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
           BIN=$(jq -r --arg arch "$RUNNER_ARCH" \
-            '[.[] | select(.type=="Binary" and .goos=="linux" and .goarch==$arch and (.name|startswith("scaffold-workflow-plugin")))] | .[0].path // ""' \
+            '[.[] | select(.type=="Binary" and .goos=="linux" and .goarch==$arch and (.name|startswith("workflow-plugin-compute-core")))] | .[0].path // ""' \
             dist/artifacts.json)
           if [ -z "$BIN" ] || [ "$BIN" = "null" ]; then
-            echo "::warning::No matching linux/$RUNNER_ARCH scaffold binary in dist/artifacts.json; skipping verify-capabilities"
+            echo "::warning::No matching linux/$RUNNER_ARCH workflow-plugin-compute-core binary in dist/artifacts.json; skipping verify-capabilities"
             jq '.[] | {name, type, goos, goarch, path}' dist/artifacts.json
             exit 0
           fi
@@ -56,7 +56,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${{ github.ref_name }}" --draft=false --repo "${{ github.repository }}"
 
-  # NOTE: scaffold-workflow-plugin does NOT notify workflow-registry on release
-  # — it's a scaffold repo, NOT an installable plugin. The notify-workflow-registry
-  # job is intentionally omitted (and registry-side type-allowlist defense
-  # in wfctl plugin registry-sync rejects type:"scaffold" if it ever leaks in).
+  # Registry publication is intentionally separate from binary release until
+  # provider catalog plugins consume this core plugin from the registry.

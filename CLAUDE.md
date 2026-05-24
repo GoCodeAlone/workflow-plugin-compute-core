@@ -1,6 +1,7 @@
-# CLAUDE.md — Workflow Plugin Template
+# CLAUDE.md — workflow-plugin-compute-core
 
-External gRPC plugin for the GoCodeAlone/workflow engine.
+External gRPC plugin and public Go module for compute protocol and provider
+catalog contracts.
 
 ## Build & Test
 
@@ -9,40 +10,18 @@ go build ./...
 go test ./... -v -race -count=1
 ```
 
-## Cross-compile for deployment
+## Cross-compile
 
 ```sh
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o scaffold-workflow-plugin ./cmd/scaffold-workflow-plugin/
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o workflow-plugin-compute-core ./cmd/workflow-plugin-compute-core/
 ```
 
 ## Structure
 
-- `cmd/scaffold-workflow-plugin/main.go` — Plugin entry point (calls `sdk.Serve`)
-- `internal/plugin.go` — Plugin manifest, module factories, step factories
-- `internal/` — All module and step implementations
-- `plugin.json` — Capability manifest for the workflow registry
-- `.goreleaser.yaml` — GoReleaser v2 config for cross-platform releases
-- `.github/workflows/ci.yml` — CI on push/PR (build + test)
-- `.github/workflows/release.yml` — Release on v* tag push (GoReleaser)
-
-## Adding a Module Type
-
-1. Create `internal/module_example.go` implementing the module
-2. Register in `internal/plugin.go` ModuleFactories()
-3. Add to `plugin.json` capabilities.moduleTypes
-4. Add tests in `internal/module_example_test.go`
-
-## Adding a Step Type
-
-1. Create `internal/step_example.go` implementing the step
-2. Register in `internal/plugin.go` StepFactories()
-3. Add to `plugin.json` capabilities.stepTypes
-4. Add tests in `internal/step_example_test.go`
-
-## Releasing
-
-```sh
-git tag v0.1.0
-git push origin v0.1.0
-```
-GoReleaser builds cross-platform binaries and creates a GitHub Release automatically.
+- `cmd/workflow-plugin-compute-core/main.go` — external plugin entrypoint
+- `internal/plugin.go` — Workflow plugin manifest
+- `protocol/types.go` — public compute protocol and provider catalog types
+- `plugin.json` — registry-facing plugin manifest
+- `.goreleaser.yaml` — GoReleaser v2 config for releases
+- `.github/workflows/ci.yml` — build, test, vet, and plugin contract validation
+- `.github/workflows/release.yml` — tagged release pipeline
