@@ -1,6 +1,7 @@
 package protocol_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,111 @@ func TestRuntimeDescriptorProducesExecutorRef(t *testing.T) {
 	}
 	if ref.ImageDigest != "sha256:image" || ref.RootFSDigest != "sha256:rootfs" {
 		t.Fatalf("executor digests = %+v", ref)
+	}
+}
+
+func TestRuntimeExecutionRequestValidatesHostIndependentInvocation(t *testing.T) {
+	req := protocol.RuntimeExecutionRequest{
+		ProtocolVersion: protocol.Version,
+		TaskID:          "task-1",
+		LeaseID:         "lease-1",
+		WorkloadKind:    protocol.WorkloadProvider,
+		ProviderConfig: protocol.ProviderConfig{
+			PluginID:   "workflow-plugin-example",
+			ProviderID: "example",
+			ContractID: "example.v1",
+			Version:    "v1.0.0",
+			ConfigRef:  "config://providers/example",
+		},
+		Operation: "capture_product",
+		Input:     mustRawMessage(t, map[string]string{"url": "https://example.test"}),
+		Env:       map[string]string{"MODE": "test"},
+		Limits:    protocol.ResourceLimits{RuntimeSeconds: 30, OutputBytes: 1024},
+	}
+
+	if err := req.Validate(); err != nil {
+		t.Fatalf("request invalid: %v", err)
+	}
+}
+
+func mustRawMessage(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal raw message: %v", err)
+	}
+	return data
+}
+
+func TestRuntimeExecutionRequestRejectsMalformedInvocation(t *testing.T) {
+	req := protocol.RuntimeExecutionRequest{
+		ProtocolVersion: "wrong",
+		TaskID:          "task-1",
+		LeaseID:         "lease-1",
+		WorkloadKind:    protocol.WorkloadProvider,
+		Limits:          protocol.ResourceLimits{RuntimeSeconds: -1},
+	}
+
+	err := req.Validate()
+	if err == nil {
+		t.Fatal("expected malformed request to fail")
+	}
+	if !strings.Contains(err.Error(), "protocol_version") ||
+		!strings.Contains(err.Error(), "resource_limits") {
+		t.Fatalf("expected protocol/resource errors, got %v", err)
+	}
+}
+
+func TestRuntimeExecutionResultValidatesTimingAndPreview(t *testing.T) {
+	result := protocol.RuntimeExecutionResult{
+		StartedAt:     time.Unix(10, 0).UTC(),
+		FinishedAt:    time.Unix(9, 0).UTC(),
+		ResultPreview: map[string]any{"payload": strings.Repeat("x", protocol.MaxRuntimeResultPreviewBytes+1)},
+	}
+
+	err := result.Validate()
+	if err == nil {
+		t.Fatal("expected malformed result to fail")
+	}
+	if !strings.Contains(err.Error(), "finished_at") ||
+		!strings.Contains(err.Error(), "result_preview") {
+		t.Fatalf("expected timing/preview errors, got %v", err)
+	}
+}
+
+func TestRuntimeServiceResultValidatesSLOEvidence(t *testing.T) {
+	result := protocol.RuntimeServiceResult{
+		StartedAt:    time.Unix(1, 0).UTC(),
+		FinishedAt:   time.Unix(2, 0).UTC(),
+		RequestHash:  protocol.CanonicalHash("request"),
+		ResponseHash: protocol.CanonicalHash("response"),
+		SLOEvidence:  protocol.SLOEvidence{StatusCode: 200, LatencyMillis: 3, Healthy: true},
+	}
+
+	if err := result.Validate(); err != nil {
+		t.Fatalf("service result invalid: %v", err)
+	}
+
+	result.SLOEvidence.StatusCode = 0
+	if err := result.Validate(); err == nil || !strings.Contains(err.Error(), "status_code") {
+		t.Fatalf("expected status code error, got %v", err)
+	}
+}
+
+func TestRuntimeServiceResultValidatesStatusEvidenceHashes(t *testing.T) {
+	result := protocol.RuntimeServiceResult{
+		RequestHash:  protocol.CanonicalHash("request"),
+		ResponseHash: protocol.CanonicalHash("response"),
+		SLOEvidence:  protocol.SLOEvidence{StatusCode: 200, LatencyMillis: 3, Healthy: true},
+		StatusEvidence: protocol.ServiceStatusEvidence{
+			CommandHash: "not-a-hash",
+			OutputHash:  protocol.CanonicalHash("output"),
+		},
+	}
+
+	err := result.Validate()
+	if err == nil || !strings.Contains(err.Error(), "command_hash") {
+		t.Fatalf("expected command hash error, got %v", err)
 	}
 }
 
