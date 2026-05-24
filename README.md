@@ -14,6 +14,14 @@ service contracts. The provider-catalog structs in `protocol/` are the typed
 declaration data that provider plugins publish and `workflow-plugin-compute`
 validates.
 
+The public catalog contract includes provider identity, org/pool scoping,
+access visibility, supported workload and network modes, runtime profiles,
+operation schemas, artifact declarations, residue policy, and upstream client
+conformance evidence. Workflow applications should treat these declarations as
+the portable provider-facing base contract; application-specific scheduling,
+task state, settlement, dashboards, and worker supervision remain outside this
+core plugin.
+
 This plugin intentionally advertises no module, step, trigger, or IaC runtime
 capabilities.
 

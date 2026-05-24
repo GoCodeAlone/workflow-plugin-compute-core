@@ -3,6 +3,7 @@ package protocol_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GoCodeAlone/workflow-plugin-compute-core/protocol"
 )
@@ -77,6 +78,210 @@ func TestProviderContractAcceptsWASMWithoutHostWorkspace(t *testing.T) {
 
 	if err := contract.Validate(); err != nil {
 		t.Fatalf("contract invalid: %v", err)
+	}
+}
+
+func TestProviderContractAcceptsAccessScopedProviderOperations(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.OrgID = "gocodealone"
+	contract.PoolID = "ci-runners"
+	contract.AccessPolicy = protocol.AccessPolicy{
+		ProviderUsageVisibility: protocol.AccessVisibilityNetwork,
+		WorkloadVisibility:      protocol.AccessVisibilityPrivate,
+		ArtifactVisibility:      protocol.AccessVisibilityPrivate,
+	}
+	contract.WorkloadKinds = append(contract.WorkloadKinds, string(protocol.WorkloadProvider))
+	contract.Operations = []protocol.ProviderOperation{{
+		ID:                 "build",
+		InputSchemaRef:     "schema://providers/example/operations/build/input/v1",
+		InputSchemaDigest:  protocol.CanonicalHash(map[string]string{"input": "object"}),
+		OutputSchemaRef:    "schema://providers/example/operations/build/output/v1",
+		OutputSchemaDigest: protocol.CanonicalHash(map[string]string{"output": "object"}),
+		Artifacts:          []string{"logs", "provenance"},
+		ArtifactSpecs: []protocol.ProviderArtifactSpec{
+			{Name: "logs", ContentType: "text/plain", MaxBytes: 1024, RetentionSeconds: 3600, Forwardable: true},
+			{Name: "provenance", Required: true, ContentType: "application/json", MaxBytes: 4096},
+		},
+	}}
+
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("contract invalid: %v", err)
+	}
+	if !contract.SupportsOperation("build") {
+		t.Fatal("expected contract to support declared operation")
+	}
+	specs := contract.Operations[0].NormalizedArtifactSpecs()
+	if len(specs) != 2 || specs[0].Name != "logs" || specs[1].Name != "provenance" {
+		t.Fatalf("unexpected normalized artifact specs: %#v", specs)
+	}
+}
+
+func TestProviderContractRejectsPoolWithoutOrg(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.PoolID = "ci-runners"
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected pool without org to fail")
+	}
+	if !strings.Contains(err.Error(), "org_id") {
+		t.Fatalf("expected org_id error, got %v", err)
+	}
+}
+
+func TestProviderContractRejectsProviderWorkloadWithoutOperations(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.WorkloadKinds = append(contract.WorkloadKinds, string(protocol.WorkloadProvider))
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected provider workload without operations to fail")
+	}
+	if !strings.Contains(err.Error(), "operations") {
+		t.Fatalf("expected operations error, got %v", err)
+	}
+}
+
+func TestProviderContractRejectsDuplicateArtifactSpecs(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.WorkloadKinds = append(contract.WorkloadKinds, string(protocol.WorkloadProvider))
+	contract.Operations = []protocol.ProviderOperation{{
+		ID:                 "build",
+		InputSchemaRef:     "schema://providers/example/operations/build/input/v1",
+		InputSchemaDigest:  protocol.CanonicalHash("input"),
+		OutputSchemaRef:    "schema://providers/example/operations/build/output/v1",
+		OutputSchemaDigest: protocol.CanonicalHash("output"),
+		ArtifactSpecs: []protocol.ProviderArtifactSpec{
+			{Name: "logs"},
+			{Name: "logs"},
+		},
+	}}
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected duplicate artifact specs to fail")
+	}
+	if !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("expected duplicate error, got %v", err)
+	}
+}
+
+func TestProviderRuntimeProfileRequiresRealClientEvidence(t *testing.T) {
+	contract := validBatchProviderContract()
+	profile := &contract.RuntimeContract.Profiles[0]
+	profile.ConformanceProfiles = append(profile.ConformanceProfiles, "upstream-client-v1")
+	profile.UpstreamClientConformance = protocol.UpstreamClientConformanceRealClient
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected real-client conformance without evidence to fail")
+	}
+	if !strings.Contains(err.Error(), "upstream_client_evidence") {
+		t.Fatalf("expected evidence error, got %v", err)
+	}
+
+	profile.UpstreamClientEvidenceRef = "artifact://providers/example/evidence/upstream-client-v1"
+	profile.UpstreamClientEvidenceDigest = protocol.CanonicalHash("evidence")
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("contract invalid with real-client evidence: %v", err)
+	}
+}
+
+func TestProviderContractRejectsDuplicateRuntimeProfiles(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.RuntimeContract.Profiles = append(contract.RuntimeContract.Profiles, contract.RuntimeContract.Profiles[0])
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected duplicate runtime profiles to fail")
+	}
+	if !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("expected duplicate runtime profile error, got %v", err)
+	}
+}
+
+func TestProviderContractRequiresUpstreamConformanceForKnownPlugins(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.PluginID = "workflow-plugin-crypto"
+	contract.RuntimeContract.Profiles[0].UpstreamClientConformance = ""
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected known upstream-client plugin without conformance to fail")
+	}
+	if !strings.Contains(err.Error(), "upstream_client_conformance") {
+		t.Fatalf("expected upstream conformance error, got %v", err)
+	}
+}
+
+func TestProviderContractRejectsRuntimeOnlySecurityAndProofTiers(t *testing.T) {
+	contract := validBatchProviderContract()
+	contract.ExecutionSecurityTiers = []protocol.ExecutionSecurityTier{protocol.ExecutionTrustedNative}
+	contract.ProofTiers = []protocol.ProofTier{protocol.ProofReceiptOnly}
+	contract.RuntimeContract.Profiles[0].ExecutionSecurityTier = protocol.ExecutionTrustedNative
+	contract.RuntimeContract.Profiles[0].ProofTier = protocol.ProofReceiptOnly
+
+	err := contract.Validate()
+	if err == nil {
+		t.Fatal("expected runtime-only tiers to fail")
+	}
+	if !strings.Contains(err.Error(), "trusted-native") || !strings.Contains(err.Error(), "receipt-only") {
+		t.Fatalf("expected trusted-native and receipt-only errors, got %v", err)
+	}
+}
+
+func TestProviderContractRejectsMismatchedProductVersionWhenPresent(t *testing.T) {
+	contract := validBatchProviderContract()
+	product := protocol.NetworkProduct{
+		ProviderConfig: protocol.ProviderConfig{
+			PluginID:   contract.PluginID,
+			ProviderID: contract.ProviderID,
+			ContractID: contract.ContractID,
+			Version:    "v9.9.9",
+		},
+		OperatingMode: protocol.NetworkModeBatch,
+		WorkloadKinds: []string{string(protocol.WorkloadCommand)},
+		SecurityFloor: protocol.PlacementRequirements{
+			ExecutorProvider:      "sandboxed-container",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+		},
+		NetworkModes: []protocol.NetworkMode{protocol.NetworkModeRelay},
+	}
+
+	err := contract.SupportsProduct(product)
+	if err == nil {
+		t.Fatal("expected mismatched product version to fail")
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Fatalf("expected version mismatch error, got %v", err)
+	}
+}
+
+func TestProviderConformanceEvidenceRequiresArtifactDigestAndObservation(t *testing.T) {
+	evidence := protocol.ProviderConformanceEvidence{
+		ProtocolVersion:       protocol.Version,
+		ID:                    "example-upstream-client-evidence",
+		PluginID:              "workflow-plugin-example",
+		ProviderID:            "example",
+		ContractID:            "example.batch.v1",
+		Version:               "v1.0.0",
+		RuntimeProfileID:      "sandboxed-container-runtime",
+		ConformanceProfile:    "upstream-client-v1",
+		UpstreamClientName:    "example-client",
+		UpstreamClientVersion: "1.2.3",
+		EvidenceRef:           "artifact://providers/example/evidence/upstream-client-v1",
+		EvidenceDigest:        protocol.CanonicalHash("evidence"),
+		ObservedAt:            time.Now().UTC(),
+	}
+
+	if err := evidence.Validate(); err != nil {
+		t.Fatalf("evidence invalid: %v", err)
+	}
+
+	evidence.EvidenceDigest = "sha256:not-hex"
+	if err := evidence.Validate(); err == nil || !strings.Contains(err.Error(), "evidence_digest") {
+		t.Fatalf("expected evidence_digest error, got %v", err)
 	}
 }
 
