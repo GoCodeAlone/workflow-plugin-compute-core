@@ -1059,10 +1059,22 @@ type ProviderUpstreamImagePolicy struct {
 }
 
 func (p ProviderUpstreamImagePolicy) Validate() error {
+	var errs []error
 	if !p.DigestPinnedImageRequired {
-		return errors.New("digest_pinned_image_required must be true")
+		errs = append(errs, errors.New("digest_pinned_image_required must be true"))
 	}
-	return nil
+	if !p.OperatorSuppliedImageRequired && strings.TrimSpace(p.RecommendedImageRef) == "" {
+		errs = append(errs, errors.New("recommended_image_ref is required unless operator_supplied_image_required is true"))
+	}
+	if p.RecommendedImageRef != "" && (strings.TrimSpace(p.RecommendedImageRef) == "" || strings.ContainsAny(p.RecommendedImageRef, "\t\r\n\x00")) {
+		errs = append(errs, errors.New("recommended_image_ref is invalid"))
+	}
+	for i, ref := range p.KnownImageRefs {
+		if strings.TrimSpace(ref) == "" || strings.ContainsAny(ref, "\t\r\n\x00") {
+			errs = append(errs, fmt.Errorf("known_image_refs[%d] is required", i))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func CanonicalHash(value any) string {
