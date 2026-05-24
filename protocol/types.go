@@ -128,8 +128,12 @@ const (
 type NetworkMode string
 
 const (
-	NetworkModeDirect NetworkMode = "direct"
-	NetworkModeRelay  NetworkMode = "relay"
+	NetworkModeDirect  NetworkMode = "direct"
+	NetworkModeRelay   NetworkMode = "relay"
+	NetworkModeTailnet NetworkMode = "tailnet"
+	NetworkModeTor     NetworkMode = "tor"
+	NetworkModeP2P     NetworkMode = "p2p"
+	NetworkModeOffline NetworkMode = "offline"
 )
 
 type PlacementRequirements struct {
@@ -1147,7 +1151,7 @@ func normalizeNetworkMode(mode NetworkMode) NetworkMode {
 
 func validNetworkMode(mode NetworkMode) bool {
 	switch mode {
-	case NetworkModeDirect, NetworkModeRelay:
+	case NetworkModeDirect, NetworkModeRelay, NetworkModeTailnet, NetworkModeTor, NetworkModeP2P, NetworkModeOffline:
 		return true
 	default:
 		return false

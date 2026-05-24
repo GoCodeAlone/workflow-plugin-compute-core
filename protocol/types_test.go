@@ -258,6 +258,24 @@ func TestProviderContractRejectsMismatchedProductVersionWhenPresent(t *testing.T
 	}
 }
 
+func TestProviderContractAcceptsWorkflowComputeNetworkModes(t *testing.T) {
+	for _, mode := range []protocol.NetworkMode{
+		protocol.NetworkModeDirect,
+		protocol.NetworkModeRelay,
+		protocol.NetworkModeTailnet,
+		protocol.NetworkModeTor,
+		protocol.NetworkModeP2P,
+		protocol.NetworkModeOffline,
+	} {
+		contract := validBatchProviderContract()
+		contract.NetworkModes = []protocol.NetworkMode{mode}
+
+		if err := contract.Validate(); err != nil {
+			t.Fatalf("contract rejected network mode %q: %v", mode, err)
+		}
+	}
+}
+
 func TestProviderConformanceEvidenceRequiresArtifactDigestAndObservation(t *testing.T) {
 	evidence := protocol.ProviderConformanceEvidence{
 		ProtocolVersion:       protocol.Version,
