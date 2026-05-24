@@ -6,9 +6,9 @@ before:
     - "sed -i.bak 's/\"version\": \".*\"/\"version\": \"{{ .Version }}\"/' plugin.json && rm -f plugin.json.bak"
 
 builds:
-  - id: scaffold-workflow-plugin
-    main: ./cmd/scaffold-workflow-plugin
-    binary: scaffold-workflow-plugin
+  - id: workflow-plugin-compute-core
+    main: ./cmd/workflow-plugin-compute-core
+    binary: workflow-plugin-compute-core
     env:
       - CGO_ENABLED=0
     goos:
@@ -19,7 +19,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{.Version}} -X github.com/GoCodeAlone/scaffold-workflow-plugin/internal.Version={{.Version}}
+      - -s -w -X main.version={{.Version}} -X github.com/GoCodeAlone/workflow-plugin-compute-core/internal.Version={{.Version}}
 
 archives:
   - formats: [tar.gz]

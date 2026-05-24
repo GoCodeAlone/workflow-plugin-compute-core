@@ -1,24 +1,25 @@
 {
-    "name": "scaffold-workflow-plugin",
-    "version": "0.0.0",
-    "description": "Scaffold repo for new workflow plugins. NOT an installable plugin — see README for the instantiation flow.",
-    "author": "GoCodeAlone",
-    "license": "MIT",
-    "type": "scaffold",
-    "tier": "community",
-    "private": false,
-    "minEngineVersion": "0.62.0",
-    "keywords": ["scaffold", "template"],
-    "homepage": "https://github.com/GoCodeAlone/scaffold-workflow-plugin",
-    "repository": "https://github.com/GoCodeAlone/scaffold-workflow-plugin",
-    "capabilities": {
-        "configProvider": false,
-        "moduleTypes": ["TEMPLATE.module"],
-        "stepTypes": ["TEMPLATE.step"],
-        "triggerTypes": [],
-        "iacProvider": {
-            "resourceTypes": ["TEMPLATE.resource"]
-        }
-    },
-    "contracts": []
+  "name": "workflow-plugin-compute-core",
+  "version": "0.0.0",
+  "description": "Public compute protocol and provider catalog core for Workflow.",
+  "author": "GoCodeAlone",
+  "license": "MIT",
+  "type": "external",
+  "tier": "community",
+  "private": false,
+  "minEngineVersion": "0.62.0",
+  "keywords": [
+    "compute",
+    "protocol",
+    "provider-catalog"
+  ],
+  "homepage": "https://github.com/GoCodeAlone/workflow-plugin-compute-core",
+  "repository": "https://github.com/GoCodeAlone/workflow-plugin-compute-core",
+  "capabilities": {
+    "configProvider": false,
+    "moduleTypes": [],
+    "stepTypes": [],
+    "triggerTypes": []
+  },
+  "contracts": []
 }

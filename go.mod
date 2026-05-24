@@ -1,4 +1,4 @@
-module github.com/GoCodeAlone/scaffold-workflow-plugin
+module github.com/GoCodeAlone/workflow-plugin-compute-core
 
 go 1.26.0
 
