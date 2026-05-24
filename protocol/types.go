@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"path"
 	"strings"
+	"time"
 )
 
 const Version = "compute.v1alpha1"
@@ -102,13 +105,25 @@ const (
 type ExecutionSecurityTier string
 
 const (
+	ExecutionTrustedNative      ExecutionSecurityTier = "trusted-native"
+	ExecutionHardenedContainer  ExecutionSecurityTier = "hardened-container"
 	ExecutionSandboxedContainer ExecutionSecurityTier = "sandboxed-container"
+	ExecutionMicroVM            ExecutionSecurityTier = "microvm"
+	ExecutionConfidentialCPU    ExecutionSecurityTier = "confidential-cpu"
+	ExecutionConfidentialGPU    ExecutionSecurityTier = "confidential-gpu"
 	ExecutionWASMCapability     ExecutionSecurityTier = "wasm-capability"
 )
 
 type ProofTier string
 
-const ProofArtifactHash ProofTier = "artifact-hash"
+const (
+	ProofReceiptOnly      ProofTier = "receipt-only"
+	ProofArtifactHash     ProofTier = "artifact-hash"
+	ProofReplicatedQuorum ProofTier = "replicated-quorum"
+	ProofAttestedReceipt  ProofTier = "attested-receipt"
+	ProofAttestedQuorum   ProofTier = "attested-quorum"
+	ProofZKReplay         ProofTier = "zk-replay"
+)
 
 type NetworkMode string
 
@@ -138,6 +153,34 @@ type ProviderConfig struct {
 	ConfigDigest string `json:"config_digest,omitempty"`
 }
 
+type AccessVisibility string
+
+const (
+	AccessVisibilityPrivate AccessVisibility = "private"
+	AccessVisibilityNetwork AccessVisibility = "network"
+	AccessVisibilityPublic  AccessVisibility = "public"
+)
+
+type AccessPolicy struct {
+	ProviderUsageVisibility AccessVisibility `json:"provider_usage_visibility,omitempty"`
+	WorkloadVisibility      AccessVisibility `json:"workload_visibility,omitempty"`
+	ArtifactVisibility      AccessVisibility `json:"artifact_visibility,omitempty"`
+}
+
+func (p AccessPolicy) Validate() error {
+	var errs []error
+	if !validAccessVisibility(p.ProviderUsageVisibility) {
+		errs = append(errs, fmt.Errorf("provider_usage_visibility %q is unsupported", p.ProviderUsageVisibility))
+	}
+	if !validAccessVisibility(p.WorkloadVisibility) {
+		errs = append(errs, fmt.Errorf("workload_visibility %q is unsupported", p.WorkloadVisibility))
+	}
+	if !validAccessVisibility(p.ArtifactVisibility) {
+		errs = append(errs, fmt.Errorf("artifact_visibility %q is unsupported", p.ArtifactVisibility))
+	}
+	return errors.Join(errs...)
+}
+
 type ProviderContract struct {
 	ProtocolVersion        string                  `json:"protocol_version"`
 	ID                     string                  `json:"id"`
@@ -146,6 +189,9 @@ type ProviderContract struct {
 	ContractID             string                  `json:"contract_id"`
 	Version                string                  `json:"version"`
 	DisplayName            string                  `json:"display_name,omitempty"`
+	OrgID                  string                  `json:"org_id,omitempty"`
+	PoolID                 string                  `json:"pool_id,omitempty"`
+	AccessPolicy           AccessPolicy            `json:"access_policy,omitzero"`
 	ConfigSchemaRef        string                  `json:"config_schema_ref"`
 	ConfigSchemaDigest     string                  `json:"config_schema_digest"`
 	OperatingModes         []NetworkOperatingMode  `json:"operating_modes"`
@@ -154,32 +200,58 @@ type ProviderContract struct {
 	ExecutionSecurityTiers []ExecutionSecurityTier `json:"execution_security_tiers"`
 	ProofTiers             []ProofTier             `json:"proof_tiers"`
 	NetworkModes           []NetworkMode           `json:"network_modes"`
+	Operations             []ProviderOperation     `json:"operations,omitempty"`
 	RuntimeContract        ProviderRuntimeContract `json:"runtime_contract"`
+	CreatedAt              time.Time               `json:"created_at,omitempty"`
 }
 
 func (c ProviderContract) Validate() error {
 	var errs []error
+	if c.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
 	for _, field := range []struct {
 		name  string
 		value string
 	}{
-		{"protocol_version", c.ProtocolVersion},
 		{"id", c.ID},
 		{"plugin_id", c.PluginID},
 		{"provider_id", c.ProviderID},
 		{"contract_id", c.ContractID},
-		{"version", c.Version},
-		{"config_schema_ref", c.ConfigSchemaRef},
-		{"config_schema_digest", c.ConfigSchemaDigest},
 	} {
-		if strings.TrimSpace(field.value) == "" {
-			errs = append(errs, fmt.Errorf("%s is required", field.name))
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	if c.ProtocolVersion != Version {
-		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	if c.OrgID != "" {
+		if err := validateIdentifier("org_id", c.OrgID); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	if c.ConfigSchemaDigest != "" && !validSHA256Ref(c.ConfigSchemaDigest) {
+	if c.PoolID != "" {
+		if c.OrgID == "" {
+			errs = append(errs, errors.New("org_id is required when pool_id is set"))
+		}
+		if err := validateIdentifier("pool_id", c.PoolID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := c.AccessPolicy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("access_policy: %w", err))
+	}
+	if strings.TrimSpace(c.Version) == "" {
+		errs = append(errs, errors.New("version is required"))
+	} else if strings.ContainsAny(c.Version, " \t\r\n\x00") {
+		errs = append(errs, errors.New("version must not contain whitespace"))
+	}
+	if strings.TrimSpace(c.ConfigSchemaRef) == "" {
+		errs = append(errs, errors.New("config_schema_ref is required"))
+	} else if err := validateScopedRef("config_schema_ref", c.ConfigSchemaRef, "schema://"); err != nil {
+		errs = append(errs, err)
+	}
+	if c.ConfigSchemaDigest == "" {
+		errs = append(errs, errors.New("config_schema_digest is required"))
+	} else if !validSHA256Ref(c.ConfigSchemaDigest) {
 		errs = append(errs, errors.New("config_schema_digest must be sha256:<64 hex chars>"))
 	}
 	if len(c.OperatingModes) == 0 {
@@ -201,21 +273,58 @@ func (c ProviderContract) Validate() error {
 	if len(c.ExecutorProviders) == 0 {
 		errs = append(errs, errors.New("executor_providers is required"))
 	}
+	for i, provider := range c.ExecutorProviders {
+		if err := validateIdentifier(fmt.Sprintf("executor_providers[%d]", i), provider); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if len(c.ExecutionSecurityTiers) == 0 {
 		errs = append(errs, errors.New("execution_security_tiers is required"))
+	}
+	for i, tier := range c.ExecutionSecurityTiers {
+		if !validExecutionSecurityTier(tier) || tier == ExecutionTrustedNative {
+			errs = append(errs, fmt.Errorf("execution_security_tiers[%d] %q is unsupported", i, tier))
+		}
 	}
 	if len(c.ProofTiers) == 0 {
 		errs = append(errs, errors.New("proof_tiers is required"))
 	}
+	for i, tier := range c.ProofTiers {
+		if !validProofTier(tier) || tier == ProofReceiptOnly {
+			errs = append(errs, fmt.Errorf("proof_tiers[%d] %q is unsupported", i, tier))
+		}
+	}
 	if len(c.NetworkModes) == 0 {
 		errs = append(errs, errors.New("network_modes is required"))
 	}
-	if len(c.RuntimeContract.Profiles) == 0 {
-		errs = append(errs, errors.New("runtime_contract.profiles is required"))
+	for i, mode := range c.NetworkModes {
+		if !validNetworkMode(normalizeNetworkMode(mode)) {
+			errs = append(errs, fmt.Errorf("network_modes[%d] %q is unsupported", i, mode))
+		}
 	}
-	for i, profile := range c.RuntimeContract.Profiles {
-		if err := profile.Validate(); err != nil {
-			errs = append(errs, fmt.Errorf("runtime_contract.profiles[%d]: %w", i, err))
+	if contains(c.WorkloadKinds, string(WorkloadProvider)) && len(c.Operations) == 0 {
+		errs = append(errs, errors.New("operations is required for provider workload contracts"))
+	}
+	seenOperations := map[string]struct{}{}
+	for i, operation := range c.Operations {
+		if err := operation.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("operations[%d]: %w", i, err))
+		}
+		if operation.ID != "" {
+			if _, exists := seenOperations[operation.ID]; exists {
+				errs = append(errs, fmt.Errorf("operations[%d].id %q is duplicated", i, operation.ID))
+			}
+			seenOperations[operation.ID] = struct{}{}
+		}
+	}
+	if err := c.RuntimeContract.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+	if ProviderPluginRequiresUpstreamClientConformance(c.PluginID) {
+		for i, profile := range c.RuntimeContract.Profiles {
+			if profile.UpstreamClientConformance == "" {
+				errs = append(errs, fmt.Errorf("runtime_contract.profiles[%d].upstream_client_conformance is required for plugin %q", i, c.PluginID))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -227,6 +336,9 @@ func (c ProviderContract) SupportsProduct(product NetworkProduct) error {
 		c.ContractID != product.ProviderConfig.ContractID {
 		return errors.New("product provider config does not match contract")
 	}
+	if product.ProviderConfig.Version != "" && c.Version != product.ProviderConfig.Version {
+		return fmt.Errorf("product provider config version %q does not match contract version %q", product.ProviderConfig.Version, c.Version)
+	}
 	if !contains(c.OperatingModes, product.OperatingMode) {
 		return fmt.Errorf("operating mode %q is unsupported", product.OperatingMode)
 	}
@@ -235,40 +347,199 @@ func (c ProviderContract) SupportsProduct(product NetworkProduct) error {
 			return fmt.Errorf("workload kind %q is unsupported", kind)
 		}
 	}
+	if !contains(c.ExecutorProviders, product.SecurityFloor.ExecutorProvider) {
+		return fmt.Errorf("executor provider %q is unsupported", product.SecurityFloor.ExecutorProvider)
+	}
+	if !contains(c.ExecutionSecurityTiers, product.SecurityFloor.ExecutionSecurityTier) {
+		return fmt.Errorf("execution security tier %q is unsupported", product.SecurityFloor.ExecutionSecurityTier)
+	}
+	if !contains(c.ProofTiers, product.SecurityFloor.ProofTier) {
+		return fmt.Errorf("proof tier %q is unsupported", product.SecurityFloor.ProofTier)
+	}
 	for _, mode := range product.NetworkModes {
-		if !contains(c.NetworkModes, mode) {
+		if !contains(c.NetworkModes, normalizeNetworkMode(mode)) {
 			return fmt.Errorf("network mode %q is unsupported", mode)
 		}
 	}
+	if !c.RuntimeContract.SupportsProduct(product) {
+		return fmt.Errorf("runtime profile for executor provider %q is unsupported", product.SecurityFloor.ExecutorProvider)
+	}
 	return nil
+}
+
+func (c ProviderContract) Matches(config ProviderConfig) bool {
+	return c.PluginID == config.PluginID &&
+		c.ProviderID == config.ProviderID &&
+		c.ContractID == config.ContractID &&
+		c.Version == config.Version
+}
+
+func (c ProviderContract) SupportsOperation(operation string) bool {
+	operation = strings.TrimSpace(operation)
+	for _, candidate := range c.Operations {
+		if candidate.ID == operation {
+			return true
+		}
+	}
+	return false
+}
+
+type ProviderOperation struct {
+	ID                 string                 `json:"id"`
+	InputSchemaRef     string                 `json:"input_schema_ref"`
+	InputSchemaDigest  string                 `json:"input_schema_digest"`
+	OutputSchemaRef    string                 `json:"output_schema_ref"`
+	OutputSchemaDigest string                 `json:"output_schema_digest"`
+	Artifacts          []string               `json:"artifacts,omitempty"`
+	ArtifactSpecs      []ProviderArtifactSpec `json:"artifact_specs,omitempty"`
+}
+
+func (o ProviderOperation) Validate() error {
+	var errs []error
+	if err := validateIdentifier("id", o.ID); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(o.InputSchemaRef) == "" {
+		errs = append(errs, errors.New("input_schema_ref is required"))
+	} else if err := validateScopedRef("input_schema_ref", o.InputSchemaRef, "schema://"); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(o.OutputSchemaRef) == "" {
+		errs = append(errs, errors.New("output_schema_ref is required"))
+	} else if err := validateScopedRef("output_schema_ref", o.OutputSchemaRef, "schema://"); err != nil {
+		errs = append(errs, err)
+	}
+	if !validSHA256Ref(o.InputSchemaDigest) {
+		errs = append(errs, errors.New("input_schema_digest must be sha256:<64 hex chars>"))
+	}
+	if !validSHA256Ref(o.OutputSchemaDigest) {
+		errs = append(errs, errors.New("output_schema_digest must be sha256:<64 hex chars>"))
+	}
+	legacyArtifacts := map[string]struct{}{}
+	for i, artifact := range o.Artifacts {
+		if !validProviderArtifactName(artifact) {
+			errs = append(errs, fmt.Errorf("artifacts[%d] %q is invalid", i, artifact))
+		}
+		legacyArtifacts[artifact] = struct{}{}
+	}
+	seenArtifactSpecs := map[string]struct{}{}
+	for i, spec := range o.ArtifactSpecs {
+		if !validProviderArtifactName(spec.Name) {
+			errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q is invalid", i, spec.Name))
+		}
+		if spec.Name != "" {
+			if _, exists := seenArtifactSpecs[spec.Name]; exists {
+				errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q is duplicated", i, spec.Name))
+			}
+			seenArtifactSpecs[spec.Name] = struct{}{}
+			if len(legacyArtifacts) > 0 {
+				if _, exists := legacyArtifacts[spec.Name]; !exists {
+					errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q must also appear in artifacts", i, spec.Name))
+				}
+			}
+		}
+		if spec.ContentType != "" {
+			if strings.TrimSpace(spec.ContentType) != spec.ContentType || strings.ContainsAny(spec.ContentType, "\x00\r\n\t") {
+				errs = append(errs, fmt.Errorf("artifact_specs[%d].content_type is invalid", i))
+			} else if _, _, err := mime.ParseMediaType(spec.ContentType); err != nil {
+				errs = append(errs, fmt.Errorf("artifact_specs[%d].content_type is invalid", i))
+			}
+		}
+		if spec.MaxBytes < 0 {
+			errs = append(errs, fmt.Errorf("artifact_specs[%d].max_bytes must not be negative", i))
+		}
+		if spec.RetentionSeconds < 0 {
+			errs = append(errs, fmt.Errorf("artifact_specs[%d].retention_seconds must not be negative", i))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (o ProviderOperation) NormalizedArtifactSpecs() []ProviderArtifactSpec {
+	if len(o.ArtifactSpecs) > 0 {
+		specs := make([]ProviderArtifactSpec, len(o.ArtifactSpecs))
+		copy(specs, o.ArtifactSpecs)
+		return specs
+	}
+	if len(o.Artifacts) == 0 {
+		return nil
+	}
+	specs := make([]ProviderArtifactSpec, 0, len(o.Artifacts))
+	for _, artifact := range o.Artifacts {
+		specs = append(specs, ProviderArtifactSpec{Name: artifact})
+	}
+	return specs
+}
+
+type ProviderArtifactSpec struct {
+	Name             string `json:"name"`
+	Required         bool   `json:"required,omitempty"`
+	ContentType      string `json:"content_type,omitempty"`
+	MaxBytes         int64  `json:"max_bytes,omitempty"`
+	RetentionSeconds int    `json:"retention_seconds,omitempty"`
+	Forwardable      bool   `json:"forwardable,omitempty"`
 }
 
 type ProviderRuntimeContract struct {
 	Profiles []ProviderRuntimeProfile `json:"profiles"`
 }
 
+func (c ProviderRuntimeContract) Validate() error {
+	var errs []error
+	if len(c.Profiles) == 0 {
+		errs = append(errs, errors.New("runtime_contract.profiles is required"))
+	}
+	seen := map[string]struct{}{}
+	for i, profile := range c.Profiles {
+		if err := profile.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("runtime_contract.profiles[%d]: %w", i, err))
+		}
+		if profile.ID != "" {
+			if _, exists := seen[profile.ID]; exists {
+				errs = append(errs, fmt.Errorf("runtime_contract.profiles[%d].id %q is duplicated", i, profile.ID))
+			}
+			seen[profile.ID] = struct{}{}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (c ProviderRuntimeContract) SupportsProduct(product NetworkProduct) bool {
+	for _, profile := range c.Profiles {
+		if profile.ExecutorProvider == product.SecurityFloor.ExecutorProvider &&
+			profile.ExecutionSecurityTier == product.SecurityFloor.ExecutionSecurityTier &&
+			profile.ProofTier == product.SecurityFloor.ProofTier {
+			return true
+		}
+	}
+	return false
+}
+
 type ProviderRuntimeProfile struct {
-	ID                        string                    `json:"id"`
-	RuntimeProfile            RuntimeProfile            `json:"runtime_profile"`
-	ExecutorProvider          string                    `json:"executor_provider"`
-	ExecutionSecurityTier     ExecutionSecurityTier     `json:"execution_security_tier"`
-	ProofTier                 ProofTier                 `json:"proof_tier"`
-	AllowedRuntimeTools       []ContainerRuntimeTool    `json:"allowed_runtime_tools,omitempty"`
-	ImageDigestRequired       bool                      `json:"image_digest_required"`
-	RootFSDigestRequired      bool                      `json:"rootfs_digest_required"`
-	AllowedMountRefs          []string                  `json:"allowed_mount_refs,omitempty"`
-	WritablePaths             []string                  `json:"writable_paths,omitempty"`
-	WritableRootFS            RuntimePermission         `json:"writable_rootfs"`
-	Privileged                RuntimePermission         `json:"privileged"`
-	HostNamespaces            RuntimePermission         `json:"host_namespaces"`
-	HostSocket                RuntimePermission         `json:"host_socket"`
-	SeccompDisable            RuntimePermission         `json:"seccomp_disable"`
-	NoNewPrivilegesDisable    RuntimePermission         `json:"no_new_privileges_disable"`
-	ConformanceProfiles       []string                  `json:"conformance_profiles,omitempty"`
-	UpstreamClientConformance UpstreamClientConformance `json:"upstream_client_conformance,omitempty"`
-	HostWorkspaceSupported    bool                      `json:"host_workspace_supported,omitempty"`
-	ResiduePolicy             ResiduePolicy             `json:"residue_policy,omitzero"`
-	WASM                      WASMRuntimeContract       `json:"wasm,omitzero"`
+	ID                           string                    `json:"id"`
+	RuntimeProfile               RuntimeProfile            `json:"runtime_profile"`
+	ExecutorProvider             string                    `json:"executor_provider"`
+	ExecutionSecurityTier        ExecutionSecurityTier     `json:"execution_security_tier"`
+	ProofTier                    ProofTier                 `json:"proof_tier"`
+	AllowedRuntimeTools          []ContainerRuntimeTool    `json:"allowed_runtime_tools,omitempty"`
+	ImageDigestRequired          bool                      `json:"image_digest_required"`
+	RootFSDigestRequired         bool                      `json:"rootfs_digest_required"`
+	AllowedMountRefs             []string                  `json:"allowed_mount_refs,omitempty"`
+	WritablePaths                []string                  `json:"writable_paths,omitempty"`
+	WritableRootFS               RuntimePermission         `json:"writable_rootfs"`
+	Privileged                   RuntimePermission         `json:"privileged"`
+	HostNamespaces               RuntimePermission         `json:"host_namespaces"`
+	HostSocket                   RuntimePermission         `json:"host_socket"`
+	SeccompDisable               RuntimePermission         `json:"seccomp_disable"`
+	NoNewPrivilegesDisable       RuntimePermission         `json:"no_new_privileges_disable"`
+	AllowedCapabilities          []string                  `json:"allowed_capabilities,omitempty"`
+	ConformanceProfiles          []string                  `json:"conformance_profiles,omitempty"`
+	UpstreamClientConformance    UpstreamClientConformance `json:"upstream_client_conformance,omitempty"`
+	UpstreamClientEvidenceRef    string                    `json:"upstream_client_evidence_ref,omitempty"`
+	UpstreamClientEvidenceDigest string                    `json:"upstream_client_evidence_digest,omitempty"`
+	HostWorkspaceSupported       bool                      `json:"host_workspace_supported,omitempty"`
+	ResiduePolicy                ResiduePolicy             `json:"residue_policy,omitzero"`
+	WASM                         WASMRuntimeContract       `json:"wasm,omitzero"`
 }
 
 type WASMRuntimeContract struct {
@@ -286,19 +557,19 @@ type WASMRuntimeContract struct {
 
 func (p ProviderRuntimeProfile) Validate() error {
 	var errs []error
-	if p.ID == "" {
-		errs = append(errs, errors.New("id is required"))
+	if err := validateIdentifier("id", p.ID); err != nil {
+		errs = append(errs, err)
 	}
 	if !validRuntimeProfile(p.RuntimeProfile) {
 		errs = append(errs, fmt.Errorf("runtime_profile %q is unsupported", p.RuntimeProfile))
 	}
-	if p.ExecutorProvider == "" {
-		errs = append(errs, errors.New("executor_provider is required"))
+	if err := validateIdentifier("executor_provider", p.ExecutorProvider); err != nil {
+		errs = append(errs, err)
 	}
-	if !validExecutionSecurityTier(p.ExecutionSecurityTier) {
+	if !validExecutionSecurityTier(p.ExecutionSecurityTier) || p.ExecutionSecurityTier == ExecutionTrustedNative {
 		errs = append(errs, fmt.Errorf("execution_security_tier %q is unsupported", p.ExecutionSecurityTier))
 	}
-	if p.ProofTier != ProofArtifactHash {
+	if !validProofTier(p.ProofTier) || p.ProofTier == ProofReceiptOnly {
 		errs = append(errs, fmt.Errorf("proof_tier %q is unsupported", p.ProofTier))
 	}
 	if err := p.ResiduePolicy.Validate(ResiduePolicyValidation{
@@ -329,11 +600,26 @@ func (p ProviderRuntimeProfile) Validate() error {
 		if len(p.AllowedRuntimeTools) == 0 {
 			errs = append(errs, errors.New("allowed_runtime_tools is required"))
 		}
+		for i, tool := range p.AllowedRuntimeTools {
+			if !validContainerRuntimeTool(tool) {
+				errs = append(errs, fmt.Errorf("allowed_runtime_tools[%d] %q is unsupported", i, tool))
+			}
+		}
 		if !p.ImageDigestRequired || !p.RootFSDigestRequired {
 			errs = append(errs, errors.New("image and rootfs digests are required"))
 		}
 		if len(p.AllowedMountRefs) == 0 {
 			errs = append(errs, errors.New("allowed_mount_refs is required"))
+		}
+		for i, ref := range p.AllowedMountRefs {
+			if err := validateIdentifier(fmt.Sprintf("allowed_mount_refs[%d]", i), ref); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	for i, path := range p.WritablePaths {
+		if !validContainerAbsolutePath(path) {
+			errs = append(errs, fmt.Errorf("writable_paths[%d] %q is invalid", i, path))
 		}
 	}
 	for _, permission := range []struct {
@@ -353,6 +639,39 @@ func (p ProviderRuntimeProfile) Validate() error {
 		}
 		if permission.name != "writable_rootfs" && permission.value != RuntimePermissionForbidden {
 			errs = append(errs, fmt.Errorf("%s must be forbidden", permission.name))
+		}
+	}
+	for i, capability := range p.AllowedCapabilities {
+		if capability == "" || strings.ToUpper(capability) != capability || strings.ContainsAny(capability, " \t\r\n\x00") {
+			errs = append(errs, fmt.Errorf("allowed_capabilities[%d] %q is invalid", i, capability))
+		}
+	}
+	if len(p.ConformanceProfiles) == 0 {
+		errs = append(errs, errors.New("conformance_profiles is required"))
+	}
+	for i, profile := range p.ConformanceProfiles {
+		if err := validateIdentifier(fmt.Sprintf("conformance_profiles[%d]", i), profile); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if p.UpstreamClientConformance != "" {
+		if !validUpstreamClientConformance(p.UpstreamClientConformance) {
+			errs = append(errs, fmt.Errorf("upstream_client_conformance %q is unsupported", p.UpstreamClientConformance))
+		}
+		if p.UpstreamClientConformance == UpstreamClientConformanceRealClient && !contains(p.ConformanceProfiles, "upstream-client-v1") {
+			errs = append(errs, errors.New("upstream_client_conformance real-client requires upstream-client-v1 conformance profile"))
+		}
+		if p.UpstreamClientConformance == UpstreamClientConformanceRealClient {
+			if p.UpstreamClientEvidenceRef == "" {
+				errs = append(errs, errors.New("upstream_client_evidence_ref is required for real-client upstream conformance"))
+			} else if err := validateScopedRef("upstream_client_evidence_ref", p.UpstreamClientEvidenceRef, "artifact://"); err != nil {
+				errs = append(errs, err)
+			}
+			if p.UpstreamClientEvidenceDigest == "" {
+				errs = append(errs, errors.New("upstream_client_evidence_digest is required for real-client upstream conformance"))
+			} else if !validSHA256Ref(p.UpstreamClientEvidenceDigest) {
+				errs = append(errs, errors.New("upstream_client_evidence_digest must be sha256:<64 hex chars>"))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -616,6 +935,64 @@ type CryptoRewardRoutingPolicy struct {
 	ManagementFeeBps        int                                 `json:"management_fee_bps,omitempty"`
 }
 
+type ProviderConformanceEvidence struct {
+	ProtocolVersion       string    `json:"protocol_version"`
+	ID                    string    `json:"id"`
+	PluginID              string    `json:"plugin_id"`
+	ProviderID            string    `json:"provider_id"`
+	ContractID            string    `json:"contract_id"`
+	Version               string    `json:"version"`
+	RuntimeProfileID      string    `json:"runtime_profile_id"`
+	ConformanceProfile    string    `json:"conformance_profile"`
+	UpstreamClientName    string    `json:"upstream_client_name"`
+	UpstreamClientVersion string    `json:"upstream_client_version"`
+	EvidenceRef           string    `json:"evidence_ref"`
+	EvidenceDigest        string    `json:"evidence_digest"`
+	ObservedAt            time.Time `json:"observed_at"`
+	CreatedAt             time.Time `json:"created_at,omitempty"`
+}
+
+func (e ProviderConformanceEvidence) Validate() error {
+	var errs []error
+	if e.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"id", e.ID},
+		{"plugin_id", e.PluginID},
+		{"provider_id", e.ProviderID},
+		{"contract_id", e.ContractID},
+		{"runtime_profile_id", e.RuntimeProfileID},
+		{"conformance_profile", e.ConformanceProfile},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if strings.TrimSpace(e.Version) == "" || strings.ContainsAny(e.Version, "\t\r\n\x00") {
+		errs = append(errs, errors.New("version is required"))
+	}
+	if strings.TrimSpace(e.UpstreamClientName) == "" {
+		errs = append(errs, errors.New("upstream_client_name is required"))
+	}
+	if strings.TrimSpace(e.UpstreamClientVersion) == "" {
+		errs = append(errs, errors.New("upstream_client_version is required"))
+	}
+	if err := validateScopedRef("evidence_ref", e.EvidenceRef, "artifact://"); err != nil {
+		errs = append(errs, err)
+	}
+	if !validSHA256Ref(e.EvidenceDigest) {
+		errs = append(errs, errors.New("evidence_digest must be sha256:<64 hex chars>"))
+	}
+	if e.ObservedAt.IsZero() {
+		errs = append(errs, errors.New("observed_at is required"))
+	}
+	return errors.Join(errs...)
+}
+
 type ProviderUpstreamClientRequirement struct {
 	ProtocolVersion       string                      `json:"protocol_version"`
 	PluginID              string                      `json:"plugin_id"`
@@ -733,7 +1110,53 @@ func validRuntimeProfile(profile RuntimeProfile) bool {
 
 func validExecutionSecurityTier(tier ExecutionSecurityTier) bool {
 	switch tier {
-	case ExecutionSandboxedContainer, ExecutionWASMCapability:
+	case ExecutionTrustedNative,
+		ExecutionHardenedContainer,
+		ExecutionSandboxedContainer,
+		ExecutionMicroVM,
+		ExecutionConfidentialCPU,
+		ExecutionConfidentialGPU,
+		ExecutionWASMCapability:
+		return true
+	default:
+		return false
+	}
+}
+
+func validProofTier(tier ProofTier) bool {
+	switch tier {
+	case ProofReceiptOnly,
+		ProofArtifactHash,
+		ProofReplicatedQuorum,
+		ProofAttestedReceipt,
+		ProofAttestedQuorum,
+		ProofZKReplay:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeNetworkMode(mode NetworkMode) NetworkMode {
+	mode = NetworkMode(strings.TrimSpace(string(mode)))
+	if mode == "" {
+		return NetworkModeDirect
+	}
+	return mode
+}
+
+func validNetworkMode(mode NetworkMode) bool {
+	switch mode {
+	case NetworkModeDirect, NetworkModeRelay:
+		return true
+	default:
+		return false
+	}
+}
+
+func validContainerRuntimeTool(tool ContainerRuntimeTool) bool {
+	switch tool {
+	case ContainerRuntimePodman, ContainerRuntimeDocker, ContainerRuntimeNerdctl, ContainerRuntimeAppleContainer:
 		return true
 	default:
 		return false
@@ -743,6 +1166,24 @@ func validExecutionSecurityTier(tier ExecutionSecurityTier) bool {
 func validRuntimePermission(permission RuntimePermission) bool {
 	switch permission {
 	case RuntimePermissionForbidden, RuntimePermissionExplicit, RuntimePermissionAllowed:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAccessVisibility(visibility AccessVisibility) bool {
+	switch visibility {
+	case "", AccessVisibilityPrivate, AccessVisibilityNetwork, AccessVisibilityPublic:
+		return true
+	default:
+		return false
+	}
+}
+
+func validUpstreamClientConformance(conformance UpstreamClientConformance) bool {
+	switch conformance {
+	case UpstreamClientConformanceShapeOnly, UpstreamClientConformanceRealClient:
 		return true
 	default:
 		return false
@@ -772,6 +1213,33 @@ func validSHA256Ref(value string) bool {
 	return err == nil
 }
 
+func validateIdentifier(name, id string) error {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if trimmed != id {
+		return fmt.Errorf("%s must not contain leading or trailing whitespace", name)
+	}
+	if strings.ContainsAny(id, " \t\r\n/:?&#") {
+		return fmt.Errorf("%s must not contain whitespace, scheme, path, query, or fragment", name)
+	}
+	return nil
+}
+
+func validateScopedRef(name, value, scheme string) error {
+	if !strings.HasPrefix(value, scheme) {
+		return fmt.Errorf("%s must use %s scoped ref", name, scheme)
+	}
+	if strings.Contains(value, "..") {
+		return fmt.Errorf("%s must not contain parent traversal", name)
+	}
+	if strings.TrimPrefix(value, scheme) == "" {
+		return fmt.Errorf("%s must include scoped path", name)
+	}
+	return nil
+}
+
 func validateComponentRef(name, value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -783,6 +1251,26 @@ func validateComponentRef(name, value string) error {
 		}
 	}
 	return fmt.Errorf("%s must use artifact://, content://, or provider:// ref", name)
+}
+
+func validContainerAbsolutePath(value string) bool {
+	return strings.HasPrefix(value, "/") && !strings.Contains(value, "\x00") && path.Clean(value) == value && !strings.Contains(value, "..")
+}
+
+func validProviderArtifactName(name string) bool {
+	return strings.TrimSpace(name) != "" &&
+		!strings.ContainsAny(name, "\\/\x00\r\n\t") &&
+		name != "." &&
+		name != ".."
+}
+
+func ProviderPluginRequiresUpstreamClientConformance(pluginID string) bool {
+	switch pluginID {
+	case "workflow-plugin-volunteer-science", "workflow-plugin-crypto":
+		return true
+	default:
+		return false
+	}
 }
 
 func contains[T comparable](values []T, want T) bool {
