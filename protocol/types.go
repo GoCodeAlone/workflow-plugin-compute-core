@@ -243,6 +243,161 @@ func (l ResourceLimits) Validate() error {
 	return errors.Join(errs...)
 }
 
+type RuntimeExecutionRequest struct {
+	ProtocolVersion string            `json:"protocol_version"`
+	TaskID          string            `json:"task_id"`
+	LeaseID         string            `json:"lease_id"`
+	WorkloadKind    WorkloadKind      `json:"workload_kind"`
+	ProviderConfig  ProviderConfig    `json:"provider_config,omitzero"`
+	Operation       string            `json:"operation,omitempty"`
+	Input           json.RawMessage   `json:"input,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	Limits          ResourceLimits    `json:"limits,omitzero"`
+}
+
+func (r RuntimeExecutionRequest) Validate() error {
+	var errs []error
+	if r.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if strings.TrimSpace(r.TaskID) == "" {
+		errs = append(errs, errors.New("task_id is required"))
+	}
+	if strings.TrimSpace(r.LeaseID) == "" {
+		errs = append(errs, errors.New("lease_id is required"))
+	}
+	if !validWorkloadKind(r.WorkloadKind) {
+		errs = append(errs, fmt.Errorf("workload_kind %q is unsupported", r.WorkloadKind))
+	}
+	if r.ProviderConfig != (ProviderConfig{}) {
+		if err := r.ProviderConfig.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("provider_config: %w", err))
+		}
+	}
+	if strings.ContainsAny(r.Operation, " \t\r\n\x00") {
+		errs = append(errs, errors.New("operation must not contain whitespace"))
+	}
+	if len(r.Input) > 0 && !json.Valid(r.Input) {
+		errs = append(errs, errors.New("input must be valid JSON"))
+	}
+	if err := r.Limits.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("resource_limits: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+const MaxRuntimeResultPreviewBytes = 16 * 1024
+
+type RuntimeExecutionResult struct {
+	StartedAt     time.Time      `json:"started_at,omitempty"`
+	FinishedAt    time.Time      `json:"finished_at,omitempty"`
+	ExitCode      int            `json:"exit_code,omitempty"`
+	Stdout        []byte         `json:"stdout,omitempty"`
+	Stderr        []byte         `json:"stderr,omitempty"`
+	ArtifactHash  string         `json:"artifact_hash,omitempty"`
+	Artifacts     []string       `json:"artifacts,omitempty"`
+	ResultPreview map[string]any `json:"result_preview,omitempty"`
+	ResourceUsage ResourceUsage  `json:"resource_usage,omitzero"`
+}
+
+func (r RuntimeExecutionResult) Validate() error {
+	var errs []error
+	if !r.StartedAt.IsZero() && !r.FinishedAt.IsZero() && r.FinishedAt.Before(r.StartedAt) {
+		errs = append(errs, errors.New("finished_at must be after started_at"))
+	}
+	if r.ArtifactHash != "" && !validSHA256Ref(r.ArtifactHash) {
+		errs = append(errs, errors.New("artifact_hash must be sha256:<64 hex chars>"))
+	}
+	if len(r.ResultPreview) > 0 {
+		data, err := json.Marshal(r.ResultPreview)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("result_preview must be JSON-serializable: %w", err))
+		} else if len(data) > MaxRuntimeResultPreviewBytes {
+			errs = append(errs, fmt.Errorf("result_preview must be at most %d bytes", MaxRuntimeResultPreviewBytes))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type SLOEvidence struct {
+	LatencyMillis int64 `json:"latency_millis,omitempty"`
+	StatusCode    int   `json:"status_code,omitempty"`
+	DeadlineMS    int64 `json:"deadline_ms,omitempty"`
+	Healthy       bool  `json:"healthy,omitempty"`
+}
+
+func (e SLOEvidence) Validate() error {
+	var errs []error
+	if e.StatusCode <= 0 {
+		errs = append(errs, errors.New("status_code is required"))
+	}
+	if e.LatencyMillis <= 0 {
+		errs = append(errs, errors.New("latency_millis is required"))
+	}
+	if e.DeadlineMS < 0 {
+		errs = append(errs, errors.New("deadline_ms must not be negative"))
+	}
+	return errors.Join(errs...)
+}
+
+type ServiceStatusEvidence struct {
+	CommandHash string `json:"command_hash,omitempty"`
+	OutputHash  string `json:"output_hash,omitempty"`
+	Preview     string `json:"preview,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+}
+
+func (e ServiceStatusEvidence) Validate() error {
+	var errs []error
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"command_hash", e.CommandHash},
+		{"output_hash", e.OutputHash},
+	} {
+		if field.value != "" && !validSHA256Ref(field.value) {
+			errs = append(errs, fmt.Errorf("%s must be sha256:<64 hex chars>", field.name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type RuntimeServiceResult struct {
+	StartedAt      time.Time             `json:"started_at,omitempty"`
+	FinishedAt     time.Time             `json:"finished_at,omitempty"`
+	RequestHash    string                `json:"request_hash,omitempty"`
+	ResponseHash   string                `json:"response_hash,omitempty"`
+	ResourceUsage  ResourceUsage         `json:"resource_usage,omitzero"`
+	SLOEvidence    SLOEvidence           `json:"slo_evidence,omitzero"`
+	StatusEvidence ServiceStatusEvidence `json:"status_evidence,omitzero"`
+}
+
+func (r RuntimeServiceResult) Validate() error {
+	var errs []error
+	if !r.StartedAt.IsZero() && !r.FinishedAt.IsZero() && r.FinishedAt.Before(r.StartedAt) {
+		errs = append(errs, errors.New("finished_at must be after started_at"))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"request_hash", r.RequestHash},
+		{"response_hash", r.ResponseHash},
+	} {
+		if field.value != "" && !validSHA256Ref(field.value) {
+			errs = append(errs, fmt.Errorf("%s must be sha256:<64 hex chars>", field.name))
+		}
+	}
+	if err := r.SLOEvidence.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("slo_evidence: %w", err))
+	}
+	if err := r.StatusEvidence.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("status_evidence: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
 type NetworkMode string
 
 const (
