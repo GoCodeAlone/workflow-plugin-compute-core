@@ -140,6 +140,13 @@ type PlacementRequirements struct {
 	ExecutorProvider      string                `json:"executor_provider,omitempty"`
 	ExecutionSecurityTier ExecutionSecurityTier `json:"execution_security_tier,omitempty"`
 	ProofTier             ProofTier             `json:"proof_tier,omitempty"`
+	HardwareClass         string                `json:"hardware_class,omitempty"`
+	RequiredCapabilities  []string              `json:"required_capabilities,omitempty"`
+}
+
+type ProofPolicy struct {
+	Quorum      int `json:"quorum,omitempty"`
+	MaxAttempts int `json:"max_attempts,omitempty"`
 }
 
 type SessionPolicy struct {
@@ -155,6 +162,77 @@ type ProviderConfig struct {
 	Version      string `json:"version,omitempty"`
 	ConfigRef    string `json:"config_ref,omitempty"`
 	ConfigDigest string `json:"config_digest,omitempty"`
+}
+
+func (p ProviderConfig) Validate() error {
+	if p == (ProviderConfig{}) {
+		return nil
+	}
+	var errs []error
+	if err := validateIdentifier("plugin_id", p.PluginID); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateIdentifier("provider_id", p.ProviderID); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateIdentifier("contract_id", p.ContractID); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(p.Version) == "" {
+		errs = append(errs, errors.New("version is required"))
+	} else if strings.ContainsAny(p.Version, " \t\r\n\x00") {
+		errs = append(errs, errors.New("version must not contain whitespace"))
+	}
+	if strings.TrimSpace(p.ConfigRef) == "" {
+		errs = append(errs, errors.New("config_ref is required"))
+	} else if err := validateScopedRef("config_ref", p.ConfigRef, "config://"); err != nil {
+		errs = append(errs, err)
+	}
+	if p.ConfigDigest != "" && !validSHA256Ref(p.ConfigDigest) {
+		errs = append(errs, errors.New("config_digest must be sha256:<64 hex chars>"))
+	}
+	return errors.Join(errs...)
+}
+
+func (p SessionPolicy) ValidateForOperatingMode(mode NetworkOperatingMode) error {
+	var errs []error
+	if p.WarmSeconds < 0 {
+		errs = append(errs, errors.New("warm_seconds must be non-negative"))
+	}
+	if p.MinRenewals < 0 {
+		errs = append(errs, errors.New("min_renewals must be non-negative"))
+	}
+	if p.MaxBatchRequests < 0 {
+		errs = append(errs, errors.New("max_batch_requests must be non-negative"))
+	}
+	switch mode {
+	case NetworkModeWarmService, NetworkModeNodeService, NetworkModeInferenceAPI:
+		if p.WarmSeconds <= 0 {
+			errs = append(errs, errors.New("warm_seconds is required for warm operating modes"))
+		}
+	case NetworkModeBatch:
+		if p.MinRenewals > 0 {
+			errs = append(errs, errors.New("min_renewals requires warm operating mode"))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func ValidateProofPolicy(proofTier ProofTier, policy ProofPolicy) error {
+	switch proofTier {
+	case ProofReplicatedQuorum, ProofAttestedQuorum:
+		if policy.Quorum < 2 {
+			return errors.New("proof_policy.quorum must be >= 2")
+		}
+		if policy.MaxAttempts != 0 && policy.MaxAttempts < policy.Quorum {
+			return errors.New("proof_policy.max_attempts must be >= quorum")
+		}
+	default:
+		if policy.Quorum > 1 || policy.MaxAttempts > 0 {
+			return errors.New("proof_policy.quorum requires replicated or attested quorum proof tier")
+		}
+	}
+	return nil
 }
 
 type AccessVisibility string
@@ -827,6 +905,7 @@ type NetworkProduct struct {
 	PoolID               string                    `json:"pool_id"`
 	WorkloadKinds        []string                  `json:"workload_kinds"`
 	SecurityFloor        PlacementRequirements     `json:"security_floor"`
+	ProofPolicy          ProofPolicy               `json:"proof_policy,omitzero"`
 	SessionPolicy        SessionPolicy             `json:"session_policy,omitzero"`
 	ProviderConfig       ProviderConfig            `json:"provider_config,omitzero"`
 	NetworkModes         []NetworkMode             `json:"network_modes"`
@@ -836,47 +915,149 @@ type NetworkProduct struct {
 	SettlementAccountID  string                    `json:"settlement_account_id,omitempty"`
 	SettlementTarget     SettlementTarget          `json:"settlement_target,omitzero"`
 	CryptoRewardRouting  CryptoRewardRoutingPolicy `json:"crypto_reward_routing,omitzero"`
+	ContributionPolicy   ContributionPolicy        `json:"contribution_policy,omitzero"`
+	AccessPolicy         AccessPolicy              `json:"access_policy,omitzero"`
+	ResiduePolicy        ResiduePolicy             `json:"residue_policy,omitzero"`
+	AdmissionMode        string                    `json:"admission_mode,omitempty"`
+	AllowPublic          bool                      `json:"allow_public,omitempty"`
+	CreatedAt            time.Time                 `json:"created_at,omitempty"`
 }
 
 func (p NetworkProduct) Validate() error {
 	var errs []error
-	for _, field := range []struct {
-		name  string
-		value string
-	}{
-		{"protocol_version", p.ProtocolVersion},
-		{"id", p.ID},
-		{"org_id", p.OrgID},
-		{"pool_id", p.PoolID},
-		{"reward_policy", p.RewardPolicy},
-		{"abuse_policy", p.AbusePolicy},
-	} {
-		if strings.TrimSpace(field.value) == "" {
-			errs = append(errs, fmt.Errorf("%s is required", field.name))
-		}
-	}
 	if p.ProtocolVersion != Version {
 		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
 	}
-	if p.OperatingMode != NetworkModeNodeService {
+	if err := validateNetworkProductID(p.ID); err != nil {
+		errs = append(errs, fmt.Errorf("id: %w", err))
+	}
+	if p.OrgID == "" {
+		errs = append(errs, errors.New("org_id is required"))
+	}
+	if p.PoolID == "" {
+		errs = append(errs, errors.New("pool_id is required"))
+	}
+	if p.OperatingMode == "" {
+		errs = append(errs, errors.New("operating_mode is required"))
+	} else if !validNetworkOperatingMode(p.OperatingMode) {
 		errs = append(errs, fmt.Errorf("operating_mode %q is unsupported", p.OperatingMode))
 	}
-	if len(p.WorkloadKinds) == 0 || len(p.NetworkModes) == 0 {
-		errs = append(errs, errors.New("workload_kinds and network_modes are required"))
+	if len(p.WorkloadKinds) == 0 {
+		errs = append(errs, errors.New("workload_kinds is required"))
 	}
-	if p.SecurityFloor.ExecutorProvider == "" || p.SecurityFloor.ExecutionSecurityTier == "" || p.SecurityFloor.ProofTier == "" {
-		errs = append(errs, errors.New("security_floor is required"))
+	for i, kind := range p.WorkloadKinds {
+		if !validWorkloadKind(WorkloadKind(strings.TrimSpace(kind))) {
+			errs = append(errs, fmt.Errorf("workload_kinds[%d] %q is unknown", i, kind))
+		}
 	}
-	if p.ProviderConfig.PluginID == "" || p.ProviderConfig.ProviderID == "" || p.ProviderConfig.ContractID == "" {
-		errs = append(errs, errors.New("provider_config identity is required"))
+	switch p.OperatingMode {
+	case NetworkModeBatch:
+	case NetworkModeWarmService, NetworkModeInferenceAPI:
+		if !contains(p.WorkloadKinds, string(WorkloadService)) {
+			errs = append(errs, fmt.Errorf("operating_mode %q requires service workload kind", p.OperatingMode))
+		}
+	case NetworkModeNodeService:
+		if !contains(p.WorkloadKinds, string(WorkloadNodeService)) {
+			errs = append(errs, fmt.Errorf("operating_mode %q requires node-service workload kind", p.OperatingMode))
+		}
 	}
-	if p.PlacementConstraints.Chain == "" || p.PlacementConstraints.Role == "" || p.PlacementConstraints.MinDiskBytes <= 0 {
-		errs = append(errs, errors.New("placement_constraints chain, role, and min_disk_bytes are required"))
+	if p.SecurityFloor.ExecutorProvider == "" {
+		errs = append(errs, errors.New("security_floor.executor_provider is required"))
 	}
-	if p.SettlementTarget.Kind == "" || p.SettlementTarget.Network == "" || p.SettlementTarget.WalletRef == "" {
-		errs = append(errs, errors.New("settlement_target is required"))
+	if p.SecurityFloor.ExecutionSecurityTier == "" {
+		errs = append(errs, errors.New("security_floor.execution_security_tier is required"))
+	} else if !validExecutionSecurityTier(p.SecurityFloor.ExecutionSecurityTier) {
+		errs = append(errs, fmt.Errorf("security_floor.execution_security_tier %q is unknown", p.SecurityFloor.ExecutionSecurityTier))
+	} else if p.SecurityFloor.ExecutionSecurityTier == ExecutionTrustedNative {
+		errs = append(errs, errors.New("security_floor.execution_security_tier trusted-native is not allowed for network products"))
+	}
+	if p.SecurityFloor.ProofTier == "" {
+		errs = append(errs, errors.New("security_floor.proof_tier is required"))
+	} else if !validProofTier(p.SecurityFloor.ProofTier) {
+		errs = append(errs, fmt.Errorf("security_floor.proof_tier %q is unknown", p.SecurityFloor.ProofTier))
+	} else if p.SecurityFloor.ProofTier == ProofReceiptOnly {
+		errs = append(errs, errors.New("security_floor.proof_tier receipt-only is not allowed for network products"))
+	} else if err := ValidateProofPolicy(p.SecurityFloor.ProofTier, p.ProofPolicy); err != nil {
+		errs = append(errs, fmt.Errorf("proof_policy: %w", err))
+	}
+	if len(p.NetworkModes) == 0 {
+		errs = append(errs, errors.New("network_modes is required"))
+	}
+	for i, mode := range p.NetworkModes {
+		if !validNetworkMode(normalizeNetworkMode(mode)) {
+			errs = append(errs, fmt.Errorf("network_modes[%d] %q is unsupported", i, mode))
+		}
+	}
+	if strings.TrimSpace(p.RewardPolicy) == "" {
+		errs = append(errs, errors.New("reward_policy is required"))
+	}
+	if strings.TrimSpace(p.AbusePolicy) == "" {
+		errs = append(errs, errors.New("abuse_policy is required"))
+	}
+	if p.SettlementAccountID != "" {
+		if err := validateIdentifier("settlement_account_id", p.SettlementAccountID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := p.SettlementTarget.Validate(p.SettlementAccountID); err != nil {
+		errs = append(errs, fmt.Errorf("settlement_target: %w", err))
+	}
+	if err := p.CryptoRewardRouting.Validate(p.SettlementTarget); err != nil {
+		errs = append(errs, fmt.Errorf("crypto_reward_routing: %w", err))
+	}
+	if err := p.PlacementConstraints.Validate(p.SettlementTarget.Kind == SettlementTargetTreasuryWallet, p.SettlementTarget); err != nil {
+		errs = append(errs, fmt.Errorf("placement_constraints: %w", err))
+	}
+	if err := p.ContributionPolicy.ValidateForRewardPolicy(p.RewardPolicy, p.SettlementTarget); err != nil {
+		errs = append(errs, fmt.Errorf("contribution_policy: %w", err))
+	}
+	if err := p.AccessPolicy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("access_policy: %w", err))
+	}
+	if err := p.ResiduePolicy.Validate(ResiduePolicyValidation{}); err != nil {
+		errs = append(errs, fmt.Errorf("residue_policy: %w", err))
+	}
+	if !p.ResiduePolicy.IsZero() && !networkProductAdmitsShortLivedResidue(p) {
+		errs = append(errs, errors.New("residue_policy is only for short-lived workload products; service products use session_policy and durable service storage"))
+	}
+	if strings.EqualFold(strings.TrimSpace(p.RewardPolicy), "upstream-credit") {
+		if p.OperatingMode != NetworkModeWarmService && p.OperatingMode != NetworkModeNodeService {
+			errs = append(errs, errors.New("upstream-credit products require headless warm-service or node-service operating mode"))
+		}
+		if !contains(p.WorkloadKinds, string(WorkloadService)) && !contains(p.WorkloadKinds, string(WorkloadNodeService)) {
+			errs = append(errs, errors.New("upstream-credit products require service or node-service workload kind"))
+		}
+	}
+	if p.OperatingMode == NetworkModeNodeService && strings.EqualFold(strings.TrimSpace(p.RewardPolicy), "profit-share") {
+		if p.SettlementTarget.Kind != SettlementTargetTreasuryWallet {
+			errs = append(errs, errors.New("node-service profit-share products require settlement_target.kind treasury_wallet"))
+		}
+		if strings.TrimSpace(p.SettlementTarget.Network) == "" {
+			errs = append(errs, errors.New("node-service profit-share products require settlement_target.network"))
+		}
+		if strings.TrimSpace(p.SettlementTarget.WalletRef) == "" {
+			errs = append(errs, errors.New("node-service profit-share products require settlement_target.wallet_ref"))
+		}
+	}
+	if err := p.SessionPolicy.ValidateForOperatingMode(p.OperatingMode); err != nil {
+		errs = append(errs, fmt.Errorf("session_policy: %w", err))
+	}
+	if err := p.ProviderConfig.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("provider_config: %w", err))
 	}
 	return errors.Join(errs...)
+}
+
+func networkProductAdmitsShortLivedResidue(p NetworkProduct) bool {
+	for _, kind := range p.WorkloadKinds {
+		switch WorkloadKind(strings.TrimSpace(kind)) {
+		case WorkloadService, WorkloadNodeService:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 type PlacementConstraints struct {
@@ -889,6 +1070,93 @@ type PlacementConstraints struct {
 	RequiredCapabilities []string        `json:"required_capabilities,omitempty"`
 	WalletRef            string          `json:"wallet_ref,omitempty"`
 	StorageGuidance      StorageGuidance `json:"storage_guidance,omitzero"`
+}
+
+func (c PlacementConstraints) Validate(required bool, target SettlementTarget) error {
+	if c.IsZero() {
+		if required {
+			return errors.New("placement constraints are required")
+		}
+		return nil
+	}
+	var errs []error
+	if c.Chain == "" {
+		if required {
+			errs = append(errs, errors.New("chain is required"))
+		}
+	} else if err := validateIdentifier("chain", c.Chain); err != nil {
+		errs = append(errs, err)
+	}
+	if c.Role == "" {
+		if required {
+			errs = append(errs, errors.New("role is required"))
+		}
+	} else if err := validateIdentifier("role", c.Role); err != nil {
+		errs = append(errs, err)
+	}
+	if c.MinDiskBytes <= 0 {
+		if required {
+			errs = append(errs, errors.New("min_disk_bytes must be positive"))
+		} else if c.MinDiskBytes < 0 {
+			errs = append(errs, errors.New("min_disk_bytes must not be negative"))
+		}
+	}
+	if c.MinMemoryBytes <= 0 {
+		if required {
+			errs = append(errs, errors.New("min_memory_bytes must be positive"))
+		} else if c.MinMemoryBytes < 0 {
+			errs = append(errs, errors.New("min_memory_bytes must not be negative"))
+		}
+	}
+	if c.MinBandwidthMbps <= 0 {
+		if required {
+			errs = append(errs, errors.New("min_bandwidth_mbps must be positive"))
+		} else if c.MinBandwidthMbps < 0 {
+			errs = append(errs, errors.New("min_bandwidth_mbps must not be negative"))
+		}
+	}
+	seen := map[string]struct{}{}
+	for i, tag := range c.RequiredCapabilities {
+		if err := validateIdentifier(fmt.Sprintf("required_capabilities[%d]", i), tag); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, ok := seen[tag]; ok {
+			errs = append(errs, fmt.Errorf("required_capabilities[%d] %q is duplicated", i, tag))
+		}
+		seen[tag] = struct{}{}
+	}
+	if c.WalletRef == "" {
+		if required {
+			errs = append(errs, errors.New("wallet_ref is required"))
+		}
+	} else {
+		if !strings.HasPrefix(c.WalletRef, "wallet://") {
+			errs = append(errs, errors.New("wallet_ref must use wallet:// scope"))
+		}
+		if strings.ContainsAny(c.WalletRef, " \t\r\n?&#") {
+			errs = append(errs, errors.New("wallet_ref must not contain whitespace, query, fragment, or parameter delimiters"))
+		}
+		if target.WalletRef != "" && c.WalletRef != target.WalletRef {
+			errs = append(errs, errors.New("wallet_ref must match settlement_target.wallet_ref"))
+		}
+	}
+	if err := c.StorageGuidance.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("storage_guidance: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func (c PlacementConstraints) IsZero() bool {
+	return c.Chain == "" &&
+		c.Role == "" &&
+		c.MinDiskBytes == 0 &&
+		c.MinMemoryBytes == 0 &&
+		c.MinBandwidthMbps == 0 &&
+		!c.RequiresIngress &&
+		len(c.RequiredCapabilities) == 0 &&
+		c.WalletRef == "" &&
+		c.StorageGuidance == (StorageGuidance{})
 }
 
 type StorageGuidance struct {
@@ -906,15 +1174,177 @@ type StorageGuidance struct {
 	SnapshotVerificationRequired bool   `json:"snapshot_verification_required,omitempty"`
 }
 
+func (g StorageGuidance) Validate() error {
+	if g == (StorageGuidance{}) {
+		return nil
+	}
+	var errs []error
+	if g.Mode != "" {
+		if err := validateIdentifier("mode", g.Mode); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if g.MinDiskBytes < 0 {
+		errs = append(errs, errors.New("min_disk_bytes must not be negative"))
+	}
+	if g.RecommendedDiskBytes < 0 {
+		errs = append(errs, errors.New("recommended_disk_bytes must not be negative"))
+	}
+	if g.GrowthMarginBytes < 0 {
+		errs = append(errs, errors.New("growth_margin_bytes must not be negative"))
+	}
+	if g.MinDiskBytes > 0 && g.MinDiskDisplay == "" {
+		errs = append(errs, errors.New("min_disk_display is required when min_disk_bytes is set"))
+	}
+	if g.RecommendedDiskBytes > 0 && g.RecommendedDiskDisplay == "" {
+		errs = append(errs, errors.New("recommended_disk_display is required when recommended_disk_bytes is set"))
+	}
+	if g.GrowthMarginBytes > 0 && g.GrowthMarginDisplay == "" {
+		errs = append(errs, errors.New("growth_margin_display is required when growth_margin_bytes is set"))
+	}
+	if g.MinDiskBytes > 0 && g.RecommendedDiskBytes > 0 && g.RecommendedDiskBytes < g.MinDiskBytes {
+		errs = append(errs, errors.New("recommended_disk_bytes must be at least min_disk_bytes"))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"min_disk_display", g.MinDiskDisplay},
+		{"recommended_disk_display", g.RecommendedDiskDisplay},
+		{"growth_margin_display", g.GrowthMarginDisplay},
+	} {
+		if strings.TrimSpace(field.value) != field.value || strings.ContainsAny(field.value, "\t\r\n") {
+			errs = append(errs, fmt.Errorf("%s must not contain surrounding whitespace or control whitespace", field.name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type ContributionAuthority string
+
+const (
+	ContributionAuthorityWFCompute ContributionAuthority = "wfcompute"
+	ContributionAuthorityUpstream  ContributionAuthority = "upstream"
+)
+
+type ContributionPolicy struct {
+	ValidationAuthority ContributionAuthority `json:"validation_authority,omitempty"`
+	CreditAuthority     ContributionAuthority `json:"credit_authority,omitempty"`
+	MonetaryPayouts     bool                  `json:"monetary_payouts,omitempty"`
+}
+
+func (p ContributionPolicy) ValidateForRewardPolicy(rewardPolicy string, target SettlementTarget) error {
+	if p == (ContributionPolicy{}) && !strings.EqualFold(strings.TrimSpace(rewardPolicy), "upstream-credit") {
+		return nil
+	}
+	var errs []error
+	if p.ValidationAuthority == "" {
+		errs = append(errs, errors.New("validation_authority is required"))
+	} else if !validContributionAuthority(p.ValidationAuthority) {
+		errs = append(errs, fmt.Errorf("validation_authority %q is unsupported", p.ValidationAuthority))
+	}
+	if p.CreditAuthority == "" {
+		errs = append(errs, errors.New("credit_authority is required"))
+	} else if !validContributionAuthority(p.CreditAuthority) {
+		errs = append(errs, fmt.Errorf("credit_authority %q is unsupported", p.CreditAuthority))
+	}
+	if strings.EqualFold(strings.TrimSpace(rewardPolicy), "upstream-credit") {
+		if p.ValidationAuthority != ContributionAuthorityUpstream {
+			errs = append(errs, errors.New("validation_authority must be upstream for upstream-credit"))
+		}
+		if p.CreditAuthority != ContributionAuthorityUpstream {
+			errs = append(errs, errors.New("credit_authority must be upstream for upstream-credit"))
+		}
+		if p.MonetaryPayouts {
+			errs = append(errs, errors.New("monetary_payouts must be false for upstream-credit"))
+		}
+		switch target.Kind {
+		case "", SettlementTargetBadgeLedger:
+		default:
+			errs = append(errs, fmt.Errorf("settlement_target.kind %q is not allowed for upstream-credit", target.Kind))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func validContributionAuthority(authority ContributionAuthority) bool {
+	switch authority {
+	case ContributionAuthorityWFCompute, ContributionAuthorityUpstream:
+		return true
+	default:
+		return false
+	}
+}
+
 type SettlementTargetKind string
 
-const SettlementTargetTreasuryWallet SettlementTargetKind = "treasury_wallet"
+const (
+	SettlementTargetPointsLedger        SettlementTargetKind = "points_ledger"
+	SettlementTargetPayrollAccount      SettlementTargetKind = "payroll_account"
+	SettlementTargetBadgeLedger         SettlementTargetKind = "badge_ledger"
+	SettlementTargetFiatTokenTreasury   SettlementTargetKind = "fiat_token_treasury"
+	SettlementTargetTreasuryWallet      SettlementTargetKind = "treasury_wallet"
+	SettlementTargetParticipantWallet   SettlementTargetKind = "participant_wallet"
+	SettlementTargetExternalDestination SettlementTargetKind = "external_destination"
+)
 
 type SettlementTarget struct {
 	Kind      SettlementTargetKind `json:"kind,omitempty"`
 	AccountID string               `json:"account_id,omitempty"`
 	Network   string               `json:"network,omitempty"`
 	WalletRef string               `json:"wallet_ref,omitempty"`
+}
+
+func (t SettlementTarget) Validate(settlementAccountID string) error {
+	if t == (SettlementTarget{}) {
+		return nil
+	}
+	var errs []error
+	switch t.Kind {
+	case SettlementTargetPointsLedger, SettlementTargetPayrollAccount, SettlementTargetBadgeLedger, SettlementTargetFiatTokenTreasury, SettlementTargetTreasuryWallet, SettlementTargetParticipantWallet, SettlementTargetExternalDestination:
+	case "":
+		errs = append(errs, errors.New("kind is required"))
+	default:
+		errs = append(errs, fmt.Errorf("kind %q is unsupported", t.Kind))
+	}
+	if t.AccountID != "" {
+		if err := validateIdentifier("account_id", t.AccountID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if settlementAccountID != "" && t.AccountID != "" && t.AccountID != settlementAccountID {
+		errs = append(errs, fmt.Errorf("account_id %q must match settlement_account_id %q", t.AccountID, settlementAccountID))
+	}
+	if t.Network != "" {
+		if err := validateIdentifier("network", t.Network); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if t.WalletRef != "" {
+		if strings.ContainsAny(t.WalletRef, " \t\r\n") {
+			errs = append(errs, errors.New("wallet_ref must not contain whitespace"))
+		}
+		if strings.ContainsAny(t.WalletRef, "?&#") {
+			errs = append(errs, errors.New("wallet_ref must not contain query, fragment, or parameter delimiters"))
+		}
+	}
+	if t.Kind == SettlementTargetTreasuryWallet {
+		if strings.TrimSpace(t.AccountID) == "" {
+			errs = append(errs, errors.New("account_id is required for treasury_wallet"))
+		}
+		if strings.TrimSpace(t.Network) == "" {
+			errs = append(errs, errors.New("network is required for treasury_wallet"))
+		}
+		if strings.TrimSpace(t.WalletRef) == "" {
+			errs = append(errs, errors.New("wallet_ref is required for treasury_wallet"))
+		}
+	}
+	if t.Kind == SettlementTargetExternalDestination {
+		if strings.TrimSpace(t.AccountID) == "" {
+			errs = append(errs, errors.New("account_id is required for external_destination"))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 type CryptoRewardCustodyMode string
@@ -937,6 +1367,67 @@ type CryptoRewardRoutingPolicy struct {
 	DistributionMode        CryptoRewardDistributionMode        `json:"distribution_mode,omitempty"`
 	ParticipantWalletSource CryptoRewardParticipantWalletSource `json:"participant_wallet_source,omitempty"`
 	ManagementFeeBps        int                                 `json:"management_fee_bps,omitempty"`
+}
+
+func (p CryptoRewardRoutingPolicy) Validate(target SettlementTarget) error {
+	if p == (CryptoRewardRoutingPolicy{}) {
+		return nil
+	}
+	var errs []error
+	if strings.TrimSpace(p.Network) == "" {
+		errs = append(errs, errors.New("network is required"))
+	} else if err := validateIdentifier("network", p.Network); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(p.TreasuryAccountID) == "" {
+		errs = append(errs, errors.New("treasury_account_id is required"))
+	} else if err := validateIdentifier("treasury_account_id", p.TreasuryAccountID); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(p.TreasuryWalletRef) == "" {
+		errs = append(errs, errors.New("treasury_wallet_ref is required"))
+	} else if err := validateScopedRef("treasury_wallet_ref", p.TreasuryWalletRef, "wallet://"); err != nil {
+		errs = append(errs, err)
+	} else if strings.ContainsAny(p.TreasuryWalletRef, " \t\r\n?&#") {
+		errs = append(errs, errors.New("treasury_wallet_ref must not contain whitespace, query, fragment, or ampersand"))
+	}
+	switch p.CustodyMode {
+	case CryptoRewardCustodyTreasuryThenDistribute:
+	case "":
+		errs = append(errs, errors.New("custody_mode is required"))
+	default:
+		errs = append(errs, fmt.Errorf("custody_mode %q is unsupported", p.CustodyMode))
+	}
+	switch p.DistributionMode {
+	case CryptoRewardDistributionContributionShare:
+	case "":
+		errs = append(errs, errors.New("distribution_mode is required"))
+	default:
+		errs = append(errs, fmt.Errorf("distribution_mode %q is unsupported", p.DistributionMode))
+	}
+	switch p.ParticipantWalletSource {
+	case CryptoRewardParticipantAccountWallet:
+	case "":
+		errs = append(errs, errors.New("participant_wallet_source is required"))
+	default:
+		errs = append(errs, fmt.Errorf("participant_wallet_source %q is unsupported", p.ParticipantWalletSource))
+	}
+	if p.ManagementFeeBps < 0 || p.ManagementFeeBps > 10_000 {
+		errs = append(errs, errors.New("management_fee_bps must be between 0 and 10000"))
+	}
+	if target.Kind != SettlementTargetTreasuryWallet {
+		errs = append(errs, errors.New("settlement_target.kind must be treasury_wallet"))
+	}
+	if target.Network != "" && p.Network != target.Network {
+		errs = append(errs, fmt.Errorf("network %q must match settlement_target.network %q", p.Network, target.Network))
+	}
+	if target.AccountID != "" && p.TreasuryAccountID != target.AccountID {
+		errs = append(errs, fmt.Errorf("treasury_account_id %q must match settlement_target.account_id %q", p.TreasuryAccountID, target.AccountID))
+	}
+	if target.WalletRef != "" && p.TreasuryWalletRef != target.WalletRef {
+		errs = append(errs, errors.New("treasury_wallet_ref must match settlement_target.wallet_ref"))
+	}
+	return errors.Join(errs...)
 }
 
 type ProviderConformanceEvidence struct {
@@ -1189,6 +1680,17 @@ func validNetworkMode(mode NetworkMode) bool {
 	default:
 		return false
 	}
+}
+
+func validateNetworkProductID(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("product_id is required")
+	}
+	if strings.ContainsAny(id, " \t\r\n/:?&#") {
+		return errors.New("product_id must not contain whitespace, scheme, path, query, or fragment")
+	}
+	return nil
 }
 
 func validContainerRuntimeTool(tool ContainerRuntimeTool) bool {

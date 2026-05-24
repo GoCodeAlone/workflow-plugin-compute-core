@@ -319,6 +319,66 @@ func TestProviderContractRejectsMismatchedProductVersionWhenPresent(t *testing.T
 	}
 }
 
+func TestNetworkProductAcceptsWorkflowComputeProductCompatibilityShape(t *testing.T) {
+	product := validBatchNetworkProduct()
+
+	if err := product.Validate(); err != nil {
+		t.Fatalf("product invalid: %v", err)
+	}
+
+	contract := validBatchProviderContract()
+	if err := contract.SupportsProduct(product); err != nil {
+		t.Fatalf("contract should support product: %v", err)
+	}
+}
+
+func TestNetworkProductRejectsServiceResiduePolicy(t *testing.T) {
+	product := validBatchNetworkProduct()
+	product.OperatingMode = protocol.NetworkModeWarmService
+	product.WorkloadKinds = []string{string(protocol.WorkloadService)}
+	product.ResiduePolicy = protocol.ResiduePolicy{
+		Mode:         protocol.ResidueModeProviderBound,
+		AllowedModes: []protocol.ResidueMode{protocol.ResidueModeProviderBound},
+	}
+
+	err := product.Validate()
+	if err == nil {
+		t.Fatal("expected service product residue policy to fail")
+	}
+	if !strings.Contains(err.Error(), "residue_policy") {
+		t.Fatalf("expected residue_policy error, got %v", err)
+	}
+}
+
+func TestProviderConfigValidatesScopedConfigRef(t *testing.T) {
+	config := protocol.ProviderConfig{
+		PluginID:     "workflow-plugin-example",
+		ProviderID:   "example",
+		ContractID:   "example.batch.v1",
+		Version:      "v1.0.0",
+		ConfigRef:    "config://providers/example/batch",
+		ConfigDigest: protocol.CanonicalHash("config"),
+	}
+
+	if err := config.Validate(); err != nil {
+		t.Fatalf("config invalid: %v", err)
+	}
+
+	config.ConfigRef = "secret://wrong-scope"
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "config_ref") {
+		t.Fatalf("expected config_ref error, got %v", err)
+	}
+}
+
+func TestValidateProofPolicyRequiresQuorumOnlyForQuorumTiers(t *testing.T) {
+	if err := protocol.ValidateProofPolicy(protocol.ProofReplicatedQuorum, protocol.ProofPolicy{Quorum: 2, MaxAttempts: 3}); err != nil {
+		t.Fatalf("quorum proof policy invalid: %v", err)
+	}
+	if err := protocol.ValidateProofPolicy(protocol.ProofArtifactHash, protocol.ProofPolicy{Quorum: 2}); err == nil || !strings.Contains(err.Error(), "quorum") {
+		t.Fatalf("expected non-quorum tier to reject quorum policy, got %v", err)
+	}
+}
+
 func TestProviderContractAcceptsWorkflowComputeNetworkModes(t *testing.T) {
 	for _, mode := range []protocol.NetworkMode{
 		protocol.NetworkModeDirect,
@@ -334,6 +394,49 @@ func TestProviderContractAcceptsWorkflowComputeNetworkModes(t *testing.T) {
 		if err := contract.Validate(); err != nil {
 			t.Fatalf("contract rejected network mode %q: %v", mode, err)
 		}
+	}
+}
+
+func validBatchNetworkProduct() protocol.NetworkProduct {
+	return protocol.NetworkProduct{
+		ProtocolVersion: protocol.Version,
+		ID:              "example-batch",
+		DisplayName:     "Example Batch",
+		Purpose:         "ci",
+		OperatingMode:   protocol.NetworkModeBatch,
+		OrgID:           "public",
+		PoolID:          "ci",
+		WorkloadKinds:   []string{string(protocol.WorkloadCommand)},
+		SecurityFloor: protocol.PlacementRequirements{
+			ExecutorProvider:      "sandboxed-container",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+			RequiredCapabilities:  []string{"linux"},
+		},
+		ProviderConfig: protocol.ProviderConfig{
+			PluginID:   "workflow-plugin-example",
+			ProviderID: "example",
+			ContractID: "example.batch.v1",
+			Version:    "v1.0.0",
+			ConfigRef:  "config://providers/example/batch",
+		},
+		NetworkModes: []protocol.NetworkMode{protocol.NetworkModeRelay},
+		PlacementConstraints: protocol.PlacementConstraints{
+			RequiredCapabilities: []string{"linux"},
+		},
+		RewardPolicy: "points",
+		AbusePolicy:  "ban",
+		AccessPolicy: protocol.AccessPolicy{
+			ProviderUsageVisibility: protocol.AccessVisibilityPublic,
+		},
+		ResiduePolicy: protocol.ResiduePolicy{
+			Mode:         protocol.ResidueModeProviderBound,
+			AllowedModes: []protocol.ResidueMode{protocol.ResidueModeIsolated, protocol.ResidueModeProviderBound},
+			PolicyHash:   protocol.CanonicalHash("residue-policy"),
+		},
+		AdmissionMode: "open",
+		AllowPublic:   true,
+		CreatedAt:     time.Now().UTC(),
 	}
 }
 
