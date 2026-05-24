@@ -1033,6 +1033,12 @@ func (r ProviderUpstreamClientRequirement) Validate() error {
 			errs = append(errs, fmt.Errorf("%s is required", field.name))
 		}
 	}
+	if strings.TrimSpace(r.Version) != r.Version || strings.ContainsAny(r.Version, "\t\r\n\x00") {
+		errs = append(errs, errors.New("version is required"))
+	}
+	if strings.TrimSpace(r.UpstreamClientName) != r.UpstreamClientName || strings.ContainsAny(r.UpstreamClientName, "\t\r\n\x00") {
+		errs = append(errs, errors.New("upstream_client_name is required"))
+	}
 	if r.ProtocolVersion != Version {
 		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
 	}
@@ -1047,6 +1053,21 @@ func (r ProviderUpstreamClientRequirement) Validate() error {
 	}
 	if err := r.ImagePolicy.Validate(); err != nil {
 		errs = append(errs, err)
+	}
+	for i, value := range r.VersionProbeCommand {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\t\r\n\x00") {
+			errs = append(errs, fmt.Errorf("version_probe_command[%d] is required", i))
+		}
+	}
+	for i, value := range r.RequiredEvidence {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\t\r\n\x00") {
+			errs = append(errs, fmt.Errorf("required_evidence[%d] is required", i))
+		}
+	}
+	for i, value := range r.Notes {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\t\r\n\x00") {
+			errs = append(errs, fmt.Errorf("notes[%d] is required", i))
+		}
 	}
 	return errors.Join(errs...)
 }
