@@ -265,6 +265,97 @@ type ExecutorCapabilities struct {
 	ExecutionTiers []ExecutionSecurityTier `json:"execution_tiers,omitempty"`
 }
 
+type ProviderCapabilityStatus string
+
+const (
+	ProviderCapabilitySupported   ProviderCapabilityStatus = "supported"
+	ProviderCapabilityDegraded    ProviderCapabilityStatus = "degraded"
+	ProviderCapabilityUnsupported ProviderCapabilityStatus = "unsupported"
+)
+
+type ProviderCapabilityReport struct {
+	Provider string                   `json:"provider"`
+	Status   ProviderCapabilityStatus `json:"status"`
+	Reason   string                   `json:"reason,omitempty"`
+}
+
+type PlacementRequirementCapabilities struct {
+	CapabilityTags    []string                   `json:"capability_tags,omitempty"`
+	ExecutorProviders []string                   `json:"executor_providers,omitempty"`
+	ExecutionTiers    []ExecutionSecurityTier    `json:"execution_tiers,omitempty"`
+	ProofTiers        []ProofTier                `json:"proof_tiers,omitempty"`
+	CapabilityReports []ProviderCapabilityReport `json:"capability_reports,omitempty"`
+	Executors         []ExecutorRef              `json:"executors,omitempty"`
+}
+
+func ValidatePlacementRequirementsAgainstCapabilities(req PlacementRequirements, caps PlacementRequirementCapabilities) error {
+	var errs []error
+	workerCapabilityTags := map[string]struct{}{}
+	for _, tag := range caps.CapabilityTags {
+		workerCapabilityTags[tag] = struct{}{}
+	}
+	requiredCapabilityTags := map[string]struct{}{}
+	for i, tag := range req.RequiredCapabilities {
+		if err := validateIdentifier(fmt.Sprintf("task requirements required_capabilities[%d]", i), tag); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, ok := requiredCapabilityTags[tag]; ok {
+			errs = append(errs, fmt.Errorf("task requirements required_capabilities[%d] %q is duplicated", i, tag))
+		}
+		requiredCapabilityTags[tag] = struct{}{}
+		if _, ok := workerCapabilityTags[tag]; !ok {
+			errs = append(errs, fmt.Errorf("worker missing required capability %q", tag))
+		}
+	}
+	if req.ExecutionSecurityTier != "" && !validExecutionSecurityTier(req.ExecutionSecurityTier) {
+		errs = append(errs, fmt.Errorf("task requirements execution_security_tier %q is unknown", req.ExecutionSecurityTier))
+	}
+	if req.ProofTier != "" && !validProofTier(req.ProofTier) {
+		errs = append(errs, fmt.Errorf("task requirements proof_tier %q is unknown", req.ProofTier))
+	}
+	if req.ExecutorProvider != "" && !contains(caps.ExecutorProviders, req.ExecutorProvider) {
+		errs = append(errs, fmt.Errorf("worker does not support executor provider %q", req.ExecutorProvider))
+	}
+	if report, ok := providerCapabilityReportForProvider(caps.CapabilityReports, req.ExecutorProvider); ok && report.Status != ProviderCapabilitySupported {
+		errs = append(errs, fmt.Errorf("worker executor provider %q is %s: %s", req.ExecutorProvider, report.Status, report.Reason))
+	}
+	if req.ExecutionSecurityTier != "" && !contains(caps.ExecutionTiers, req.ExecutionSecurityTier) {
+		errs = append(errs, fmt.Errorf("worker does not support execution security tier %q", req.ExecutionSecurityTier))
+	}
+	if req.ProofTier != "" && !contains(caps.ProofTiers, req.ProofTier) {
+		errs = append(errs, fmt.Errorf("worker does not support proof tier %q", req.ProofTier))
+	}
+	if len(caps.Executors) > 0 && !ExecutorCapabilitiesHaveSupportedMatch(req, caps) {
+		errs = append(errs, errors.New("worker has no supported executor matching task placement requirements"))
+	}
+	return errors.Join(errs...)
+}
+
+func ExecutorCapabilitiesHaveSupportedMatch(req PlacementRequirements, caps PlacementRequirementCapabilities) bool {
+	for _, executor := range caps.Executors {
+		if ExecutorMatchesPlacementRequirements(executor, req) {
+			report, ok := providerCapabilityReportForProvider(caps.CapabilityReports, executor.Provider)
+			if !ok || report.Status == ProviderCapabilitySupported {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func providerCapabilityReportForProvider(reports []ProviderCapabilityReport, provider string) (ProviderCapabilityReport, bool) {
+	if provider == "" {
+		return ProviderCapabilityReport{}, false
+	}
+	for _, report := range reports {
+		if report.Provider == provider {
+			return report, true
+		}
+	}
+	return ProviderCapabilityReport{}, false
+}
+
 func ResourceLimitsRequireResourceConstrainedExecutor(limits ResourceLimits) bool {
 	return limits.CPUPercent > 0 || limits.MemoryBytes > 0
 }
