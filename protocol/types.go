@@ -1589,6 +1589,47 @@ type PlacementConstraints struct {
 	StorageGuidance      StorageGuidance `json:"storage_guidance,omitzero"`
 }
 
+type PlacementCapabilities struct {
+	DiskBytes      int64    `json:"disk_bytes,omitempty"`
+	MemoryBytes    int64    `json:"memory_bytes,omitempty"`
+	BandwidthMbps  int64    `json:"bandwidth_mbps,omitempty"`
+	IngressCapable bool     `json:"ingress_capable,omitempty"`
+	CapabilityTags []string `json:"capability_tags,omitempty"`
+}
+
+type PlacementNetworkPolicy struct {
+	AllowIngress bool `json:"allow_ingress,omitempty"`
+}
+
+func PlacementConstraintsSatisfiedBy(c PlacementConstraints, caps PlacementCapabilities, task PlacementNetworkPolicy) error {
+	if c.IsZero() {
+		return nil
+	}
+	var errs []error
+	if c.MinDiskBytes > 0 && caps.DiskBytes < c.MinDiskBytes {
+		errs = append(errs, fmt.Errorf("worker disk_bytes %d below placement min_disk_bytes %d", caps.DiskBytes, c.MinDiskBytes))
+	}
+	if c.MinMemoryBytes > 0 && caps.MemoryBytes < c.MinMemoryBytes {
+		errs = append(errs, fmt.Errorf("worker memory_bytes %d below placement min_memory_bytes %d", caps.MemoryBytes, c.MinMemoryBytes))
+	}
+	if c.MinBandwidthMbps > 0 && caps.BandwidthMbps < c.MinBandwidthMbps {
+		errs = append(errs, fmt.Errorf("worker bandwidth_mbps %d below placement min_bandwidth_mbps %d", caps.BandwidthMbps, c.MinBandwidthMbps))
+	}
+	if c.RequiresIngress && (!caps.IngressCapable || !task.AllowIngress) {
+		errs = append(errs, errors.New("worker/task does not satisfy placement ingress requirement"))
+	}
+	capabilityTags := map[string]struct{}{}
+	for _, tag := range caps.CapabilityTags {
+		capabilityTags[tag] = struct{}{}
+	}
+	for _, tag := range c.RequiredCapabilities {
+		if _, ok := capabilityTags[tag]; !ok {
+			errs = append(errs, fmt.Errorf("worker missing placement required capability %q", tag))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (c PlacementConstraints) Validate(required bool, target SettlementTarget) error {
 	if c.IsZero() {
 		if required {
