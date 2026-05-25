@@ -1327,6 +1327,32 @@ func DefaultProviderRuntimeProfile(executorProvider string, tier ExecutionSecuri
 	}
 }
 
+type ProviderRuntimeContractOptions struct {
+	ConformanceProfiles          []string
+	UpstreamClientConformance    UpstreamClientConformance
+	UpstreamClientEvidenceRef    string
+	UpstreamClientEvidenceDigest string
+}
+
+func DefaultProviderRuntimeContract(executors []string, tiers []ExecutionSecurityTier, proofs []ProofTier, options ProviderRuntimeContractOptions) ProviderRuntimeContract {
+	profiles := make([]ProviderRuntimeProfile, 0, len(executors)*len(tiers)*len(proofs))
+	for _, executorProvider := range executors {
+		for _, tier := range tiers {
+			for _, proof := range proofs {
+				profile := DefaultProviderRuntimeProfile(executorProvider, tier, proof)
+				profile.ConformanceProfiles = append(profile.ConformanceProfiles, options.ConformanceProfiles...)
+				if options.UpstreamClientConformance != "" {
+					profile.UpstreamClientConformance = options.UpstreamClientConformance
+				}
+				profile.UpstreamClientEvidenceRef = options.UpstreamClientEvidenceRef
+				profile.UpstreamClientEvidenceDigest = options.UpstreamClientEvidenceDigest
+				profiles = append(profiles, profile)
+			}
+		}
+	}
+	return ProviderRuntimeContract{Profiles: profiles}
+}
+
 type NetworkProduct struct {
 	ProtocolVersion      string                    `json:"protocol_version"`
 	ID                   string                    `json:"id"`

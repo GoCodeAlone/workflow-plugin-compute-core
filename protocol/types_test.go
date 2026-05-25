@@ -778,6 +778,39 @@ func TestProviderContractAppliesProviderConformanceEvidence(t *testing.T) {
 	}
 }
 
+func TestDefaultProviderRuntimeContractBuildsRuntimeMatrix(t *testing.T) {
+	contract := protocol.DefaultProviderRuntimeContract(
+		[]string{"sandboxed-command", "service-sandboxed-container"},
+		[]protocol.ExecutionSecurityTier{protocol.ExecutionSandboxedContainer},
+		[]protocol.ProofTier{protocol.ProofArtifactHash},
+		protocol.ProviderRuntimeContractOptions{
+			ConformanceProfiles:       []string{"upstream-client-v1"},
+			UpstreamClientConformance: protocol.UpstreamClientConformanceRealClient,
+			UpstreamClientEvidenceRef: "artifact://providers/example/evidence/upstream-client-v1",
+			UpstreamClientEvidenceDigest: protocol.CanonicalHash(
+				"evidence",
+			),
+		},
+	)
+
+	if len(contract.Profiles) != 2 {
+		t.Fatalf("runtime profiles = %d, want 2: %+v", len(contract.Profiles), contract.Profiles)
+	}
+	for _, profile := range contract.Profiles {
+		if profile.ExecutionSecurityTier != protocol.ExecutionSandboxedContainer ||
+			profile.ProofTier != protocol.ProofArtifactHash ||
+			profile.UpstreamClientConformance != protocol.UpstreamClientConformanceRealClient ||
+			profile.UpstreamClientEvidenceRef == "" ||
+			profile.UpstreamClientEvidenceDigest == "" {
+			t.Fatalf("runtime profile missing shared options: %+v", profile)
+		}
+		if !slices.Contains(profile.ConformanceProfiles, "service-oci-v1") ||
+			!slices.Contains(profile.ConformanceProfiles, "upstream-client-v1") {
+			t.Fatalf("runtime profile missing default or option conformance profiles: %+v", profile.ConformanceProfiles)
+		}
+	}
+}
+
 func countString(values []string, target string) int {
 	count := 0
 	for _, value := range values {
