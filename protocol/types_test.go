@@ -415,6 +415,77 @@ func TestExecutorCapabilitiesHaveResourceConstrainedMatch(t *testing.T) {
 	}
 }
 
+func TestValidatePlacementRequirementsAgainstCapabilities(t *testing.T) {
+	req := protocol.PlacementRequirements{
+		ExecutorProvider:      "sandboxed-command",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+		RequiredCapabilities:  []string{"mobile", "mobile", "bad tag"},
+	}
+	caps := protocol.PlacementRequirementCapabilities{
+		CapabilityTags:    []string{"mobile"},
+		ExecutorProviders: []string{"other-provider"},
+		ExecutionTiers:    []protocol.ExecutionSecurityTier{protocol.ExecutionTrustedNative},
+		ProofTiers:        []protocol.ProofTier{protocol.ProofReceiptOnly},
+		CapabilityReports: []protocol.ProviderCapabilityReport{{
+			Provider: "sandboxed-command",
+			Status:   protocol.ProviderCapabilityUnsupported,
+			Reason:   "runtime unavailable",
+		}},
+		Executors: []protocol.ExecutorRef{{
+			Provider:              "sandboxed-command",
+			ExecutionSecurityTier: protocol.ExecutionTrustedNative,
+			ProofTier:             protocol.ProofReceiptOnly,
+		}},
+	}
+
+	err := protocol.ValidatePlacementRequirementsAgainstCapabilities(req, caps)
+	if err == nil {
+		t.Fatal("expected placement requirements to reject incompatible capabilities")
+	}
+	for _, want := range []string{
+		"task requirements required_capabilities[1] \"mobile\" is duplicated",
+		"task requirements required_capabilities[2] must not contain whitespace",
+		`worker does not support executor provider "sandboxed-command"`,
+		`worker executor provider "sandboxed-command" is unsupported: runtime unavailable`,
+		`worker does not support execution security tier "sandboxed-container"`,
+		`worker does not support proof tier "artifact-hash"`,
+		"worker has no supported executor matching task placement requirements",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected placement error to contain %q, got %v", want, err)
+		}
+	}
+
+	validCaps := protocol.PlacementRequirementCapabilities{
+		CapabilityTags:    []string{"mobile"},
+		ExecutorProviders: []string{"sandboxed-command"},
+		ExecutionTiers:    []protocol.ExecutionSecurityTier{protocol.ExecutionSandboxedContainer},
+		ProofTiers:        []protocol.ProofTier{protocol.ProofArtifactHash},
+		Executors: []protocol.ExecutorRef{{
+			Provider:              "sandboxed-command",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+		}},
+	}
+	validReq := req
+	validReq.RequiredCapabilities = []string{"mobile"}
+	if err := protocol.ValidatePlacementRequirementsAgainstCapabilities(validReq, validCaps); err != nil {
+		t.Fatalf("compatible placement requirements rejected: %v", err)
+	}
+
+	unknownReq := protocol.PlacementRequirements{
+		ExecutionSecurityTier: protocol.ExecutionSecurityTier("magic-vm"),
+		ProofTier:             protocol.ProofTier("pinkie-promise"),
+	}
+	err = protocol.ValidatePlacementRequirementsAgainstCapabilities(unknownReq, protocol.PlacementRequirementCapabilities{})
+	if err == nil ||
+		!strings.Contains(err.Error(), "task requirements execution_security_tier") ||
+		!strings.Contains(err.Error(), "task requirements proof_tier") {
+		t.Fatalf("expected unknown tier errors, got %v", err)
+	}
+}
+
 func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	limits := protocol.ResourceLimits{
 		CPUPercent:     -1,
