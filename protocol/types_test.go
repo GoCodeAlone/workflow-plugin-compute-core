@@ -811,6 +811,37 @@ func TestDefaultProviderRuntimeContractBuildsRuntimeMatrix(t *testing.T) {
 	}
 }
 
+func TestProviderRuntimeContractSelectsProfileForPlacementRequirements(t *testing.T) {
+	contract := protocol.DefaultProviderRuntimeContract(
+		[]string{"sandboxed-command", "service-sandboxed-container"},
+		[]protocol.ExecutionSecurityTier{protocol.ExecutionSandboxedContainer},
+		[]protocol.ProofTier{protocol.ProofArtifactHash},
+		protocol.ProviderRuntimeContractOptions{},
+	)
+
+	profile, ok := contract.RuntimeProfileForRequirements(protocol.PlacementRequirements{
+		ExecutorProvider:      "service-sandboxed-container",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+	})
+
+	if !ok {
+		t.Fatal("expected matching runtime profile")
+	}
+	if profile.ExecutorProvider != "service-sandboxed-container" ||
+		profile.ExecutionSecurityTier != protocol.ExecutionSandboxedContainer ||
+		profile.ProofTier != protocol.ProofArtifactHash {
+		t.Fatalf("selected runtime profile = %+v", profile)
+	}
+	if _, ok := contract.RuntimeProfileForRequirements(protocol.PlacementRequirements{
+		ExecutorProvider:      "node-service-sandboxed-container",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+	}); ok {
+		t.Fatal("unexpected runtime profile match for unsupported executor")
+	}
+}
+
 func TestDefaultProviderRuntimeProfileMatchesKnownExecutorShapes(t *testing.T) {
 	tests := []struct {
 		executor               string
