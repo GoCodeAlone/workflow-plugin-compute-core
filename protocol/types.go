@@ -1304,26 +1304,58 @@ func (p ResiduePolicy) UsesReusableWorkspace() bool {
 }
 
 func DefaultProviderRuntimeProfile(executorProvider string, tier ExecutionSecurityTier, proof ProofTier) ProviderRuntimeProfile {
+	runtimeProfile := RuntimeProfileSandboxedOCI
+	writableRootFS := RuntimePermissionForbidden
+	capabilities := []string{}
+	conformance := []string{"sandboxed-oci-v1"}
+	mountRefs := []string{"workspace"}
+	writablePaths := []string{"/tmp"}
+	runtimeTools := []ContainerRuntimeTool{ContainerRuntimePodman, ContainerRuntimeDocker, ContainerRuntimeNerdctl}
+	imageDigestRequired := true
+	rootFSDigestRequired := true
+	switch executorProvider {
+	case "sandboxed-container-build":
+		runtimeProfile = RuntimeProfileContainerBuild
+		writableRootFS = RuntimePermissionExplicit
+		capabilities = []string{"CHOWN", "FOWNER"}
+		conformance = []string{"container-build-v1"}
+		writablePaths = []string{"/tmp", "/wfcompute-build"}
+	case "service-sandboxed-container", "node-service-sandboxed-container":
+		runtimeProfile = RuntimeProfileServiceOCI
+		conformance = []string{"service-oci-v1"}
+		if executorProvider == "node-service-sandboxed-container" {
+			mountRefs = []string{"workspace", "node-data"}
+		}
+	case "wasm-component":
+		runtimeProfile = RuntimeProfileWASMComponent
+		conformance = []string{"wasm-component-v1"}
+		mountRefs = nil
+		writablePaths = nil
+		runtimeTools = nil
+		imageDigestRequired = false
+		rootFSDigestRequired = false
+	}
+	hostWorkspaceSupported := runtimeProfile != RuntimeProfileWASMComponent && runtimeProfile != RuntimeProfileBrowserWorker
 	return ProviderRuntimeProfile{
-		ID:                        executorProvider + "-" + string(tier) + "-" + string(proof) + "-runtime",
-		RuntimeProfile:            RuntimeProfileServiceOCI,
-		ExecutorProvider:          executorProvider,
-		ExecutionSecurityTier:     tier,
-		ProofTier:                 proof,
-		AllowedRuntimeTools:       []ContainerRuntimeTool{ContainerRuntimePodman, ContainerRuntimeDocker, ContainerRuntimeNerdctl},
-		ImageDigestRequired:       true,
-		RootFSDigestRequired:      true,
-		AllowedMountRefs:          []string{"workspace", "node-data"},
-		WritablePaths:             []string{"/tmp"},
-		WritableRootFS:            RuntimePermissionForbidden,
-		Privileged:                RuntimePermissionForbidden,
-		HostNamespaces:            RuntimePermissionForbidden,
-		HostSocket:                RuntimePermissionForbidden,
-		SeccompDisable:            RuntimePermissionForbidden,
-		NoNewPrivilegesDisable:    RuntimePermissionForbidden,
-		ConformanceProfiles:       []string{"service-oci-v1"},
-		HostWorkspaceSupported:    true,
-		UpstreamClientConformance: UpstreamClientConformanceShapeOnly,
+		ID:                     executorProvider + "-" + string(tier) + "-" + string(proof) + "-runtime",
+		RuntimeProfile:         runtimeProfile,
+		ExecutorProvider:       executorProvider,
+		ExecutionSecurityTier:  tier,
+		ProofTier:              proof,
+		AllowedRuntimeTools:    runtimeTools,
+		ImageDigestRequired:    imageDigestRequired,
+		RootFSDigestRequired:   rootFSDigestRequired,
+		AllowedMountRefs:       mountRefs,
+		WritablePaths:          writablePaths,
+		WritableRootFS:         writableRootFS,
+		Privileged:             RuntimePermissionForbidden,
+		HostNamespaces:         RuntimePermissionForbidden,
+		HostSocket:             RuntimePermissionForbidden,
+		SeccompDisable:         RuntimePermissionForbidden,
+		NoNewPrivilegesDisable: RuntimePermissionForbidden,
+		AllowedCapabilities:    capabilities,
+		ConformanceProfiles:    conformance,
+		HostWorkspaceSupported: hostWorkspaceSupported,
 	}
 }
 
