@@ -247,6 +247,19 @@ func (e ExecutorRef) RequiresAttestation() bool {
 	}
 }
 
+func ExecutorMatchesPlacementRequirements(executor ExecutorRef, req PlacementRequirements) bool {
+	if req.ExecutorProvider != "" && executor.Provider != req.ExecutorProvider {
+		return false
+	}
+	if req.ExecutionSecurityTier != "" && executor.ExecutionSecurityTier != req.ExecutionSecurityTier {
+		return false
+	}
+	if req.ProofTier != "" && executor.ProofTier != req.ProofTier {
+		return false
+	}
+	return true
+}
+
 type ResourceUsage struct {
 	CPUMillis      int64  `json:"cpu_millis,omitempty"`
 	GPUMillis      int64  `json:"gpu_millis,omitempty"`
