@@ -1920,6 +1920,43 @@ func (e ProviderConformanceEvidence) Validate() error {
 	return errors.Join(errs...)
 }
 
+func (c *ProviderContract) ApplyProviderConformanceEvidence(evidence ProviderConformanceEvidence) error {
+	if c == nil {
+		return errors.New("provider contract is nil")
+	}
+	if err := evidence.Validate(); err != nil {
+		return err
+	}
+	if evidence.PluginID != c.PluginID ||
+		evidence.ProviderID != c.ProviderID ||
+		evidence.ContractID != c.ContractID ||
+		evidence.Version != c.Version {
+		return fmt.Errorf("provider conformance evidence %q does not match provider contract tuple", evidence.ID)
+	}
+	for i := range c.RuntimeContract.Profiles {
+		if c.RuntimeContract.Profiles[i].ID != evidence.RuntimeProfileID {
+			continue
+		}
+		c.RuntimeContract.Profiles[i].UpstreamClientConformance = UpstreamClientConformanceRealClient
+		c.RuntimeContract.Profiles[i].UpstreamClientEvidenceRef = evidence.EvidenceRef
+		c.RuntimeContract.Profiles[i].UpstreamClientEvidenceDigest = evidence.EvidenceDigest
+		if !containsString(c.RuntimeContract.Profiles[i].ConformanceProfiles, evidence.ConformanceProfile) {
+			c.RuntimeContract.Profiles[i].ConformanceProfiles = append(c.RuntimeContract.Profiles[i].ConformanceProfiles, evidence.ConformanceProfile)
+		}
+		return nil
+	}
+	return fmt.Errorf("provider conformance evidence %q runtime profile %q does not match provider contract", evidence.ID, evidence.RuntimeProfileID)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 type ProviderUpstreamClientRequirement struct {
 	ProtocolVersion       string                      `json:"protocol_version"`
 	PluginID              string                      `json:"plugin_id"`
