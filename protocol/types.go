@@ -260,6 +260,49 @@ func ExecutorMatchesPlacementRequirements(executor ExecutorRef, req PlacementReq
 	return true
 }
 
+type ExecutorCapabilities struct {
+	Executors      []ExecutorRef           `json:"executors,omitempty"`
+	ExecutionTiers []ExecutionSecurityTier `json:"execution_tiers,omitempty"`
+}
+
+func ResourceLimitsRequireResourceConstrainedExecutor(limits ResourceLimits) bool {
+	return limits.CPUPercent > 0 || limits.MemoryBytes > 0
+}
+
+func ExecutorCapabilitiesHaveResourceConstrainedMatch(req PlacementRequirements, caps ExecutorCapabilities) bool {
+	if len(caps.Executors) == 0 {
+		for _, tier := range caps.ExecutionTiers {
+			if ExecutionTierSupportsResourceLimits(tier) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, executor := range caps.Executors {
+		if !ExecutorMatchesPlacementRequirements(executor, req) {
+			continue
+		}
+		if ExecutionTierSupportsResourceLimits(executor.ExecutionSecurityTier) {
+			return true
+		}
+	}
+	return false
+}
+
+func ExecutionTierSupportsResourceLimits(tier ExecutionSecurityTier) bool {
+	switch tier {
+	case ExecutionHardenedContainer,
+		ExecutionSandboxedContainer,
+		ExecutionMicroVM,
+		ExecutionConfidentialCPU,
+		ExecutionConfidentialGPU,
+		ExecutionWASMCapability:
+		return true
+	default:
+		return false
+	}
+}
+
 type ResourceUsage struct {
 	CPUMillis      int64  `json:"cpu_millis,omitempty"`
 	GPUMillis      int64  `json:"gpu_millis,omitempty"`
