@@ -259,6 +259,47 @@ func TestExecutorRefValidateForProofRequiresDigestsForNonNativeExecutors(t *test
 	}
 }
 
+func TestExecutorMatchesPlacementRequirements(t *testing.T) {
+	executor := protocol.ExecutorRef{
+		Provider:              "sandboxed-command",
+		Version:               "dev",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+	}
+
+	if !protocol.ExecutorMatchesPlacementRequirements(executor, protocol.PlacementRequirements{}) {
+		t.Fatal("empty placement requirements should match an executor")
+	}
+	if !protocol.ExecutorMatchesPlacementRequirements(executor, protocol.PlacementRequirements{
+		ExecutorProvider:      "sandboxed-command",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+	}) {
+		t.Fatal("matching provider/security/proof requirements should match executor")
+	}
+	for name, req := range map[string]protocol.PlacementRequirements{
+		"provider": {
+			ExecutorProvider:      "service-sandboxed-container",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+		},
+		"security tier": {
+			ExecutorProvider:      "sandboxed-command",
+			ExecutionSecurityTier: protocol.ExecutionMicroVM,
+			ProofTier:             protocol.ProofArtifactHash,
+		},
+		"proof tier": {
+			ExecutorProvider:      "sandboxed-command",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofAttestedReceipt,
+		},
+	} {
+		if protocol.ExecutorMatchesPlacementRequirements(executor, req) {
+			t.Fatalf("%s mismatch unexpectedly matched executor", name)
+		}
+	}
+}
+
 func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	limits := protocol.ResourceLimits{
 		CPUPercent:     -1,
