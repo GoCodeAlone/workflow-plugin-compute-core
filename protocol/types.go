@@ -1019,14 +1019,19 @@ func (c ProviderRuntimeContract) Validate() error {
 }
 
 func (c ProviderRuntimeContract) SupportsProduct(product NetworkProduct) bool {
+	_, ok := c.RuntimeProfileForRequirements(product.SecurityFloor)
+	return ok
+}
+
+func (c ProviderRuntimeContract) RuntimeProfileForRequirements(req PlacementRequirements) (ProviderRuntimeProfile, bool) {
 	for _, profile := range c.Profiles {
-		if profile.ExecutorProvider == product.SecurityFloor.ExecutorProvider &&
-			profile.ExecutionSecurityTier == product.SecurityFloor.ExecutionSecurityTier &&
-			profile.ProofTier == product.SecurityFloor.ProofTier {
-			return true
+		if profile.ExecutorProvider == req.ExecutorProvider &&
+			profile.ExecutionSecurityTier == req.ExecutionSecurityTier &&
+			profile.ProofTier == req.ProofTier {
+			return profile, true
 		}
 	}
-	return false
+	return ProviderRuntimeProfile{}, false
 }
 
 type ProviderRuntimeProfile struct {
