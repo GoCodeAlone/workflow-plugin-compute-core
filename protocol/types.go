@@ -323,6 +323,29 @@ type ResourceLimits struct {
 	OutputBytes        int64 `json:"output_bytes,omitempty"`
 }
 
+type ResourceCapacity struct {
+	CPUCount    int   `json:"cpu_count,omitempty"`
+	MemoryBytes int64 `json:"memory_bytes,omitempty"`
+	DiskBytes   int64 `json:"disk_bytes,omitempty"`
+}
+
+func ValidateResourceLimitsAgainstCapacity(limits ResourceLimits, capacity ResourceCapacity) error {
+	var errs []error
+	if limits.CPUPercent > 0 && capacity.CPUCount > 0 {
+		cpuCapacity := capacity.CPUCount * 100
+		if limits.CPUPercent > cpuCapacity {
+			errs = append(errs, fmt.Errorf("resource_limits.cpu_percent %d exceeds worker CPU capacity %d", limits.CPUPercent, cpuCapacity))
+		}
+	}
+	if limits.MemoryBytes > 0 && capacity.MemoryBytes > 0 && limits.MemoryBytes > capacity.MemoryBytes {
+		errs = append(errs, fmt.Errorf("resource_limits.memory_bytes %d exceeds worker memory_bytes %d", limits.MemoryBytes, capacity.MemoryBytes))
+	}
+	if limits.WorkspaceBytes > 0 && capacity.DiskBytes > 0 && limits.WorkspaceBytes > capacity.DiskBytes {
+		errs = append(errs, fmt.Errorf("resource_limits.workspace_bytes %d exceeds worker disk_bytes %d", limits.WorkspaceBytes, capacity.DiskBytes))
+	}
+	return errors.Join(errs...)
+}
+
 func (l ResourceLimits) Validate() error {
 	var errs []error
 	if l.CPUPercent < 0 {
