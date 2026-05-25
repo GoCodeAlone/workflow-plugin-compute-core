@@ -460,6 +460,20 @@ func (c RuntimeAdapterContract) SupportsAdapterKind(kind RuntimeAdapterKind) boo
 
 const MaxRuntimeResultPreviewBytes = 16 * 1024
 
+func ValidateRuntimeResultPreview(preview map[string]any) error {
+	if len(preview) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(preview)
+	if err != nil {
+		return fmt.Errorf("result_preview must be JSON-serializable: %w", err)
+	}
+	if len(data) > MaxRuntimeResultPreviewBytes {
+		return fmt.Errorf("result_preview must be at most %d bytes", MaxRuntimeResultPreviewBytes)
+	}
+	return nil
+}
+
 type RuntimeExecutionResult struct {
 	StartedAt     time.Time      `json:"started_at,omitempty"`
 	FinishedAt    time.Time      `json:"finished_at,omitempty"`
@@ -480,13 +494,8 @@ func (r RuntimeExecutionResult) Validate() error {
 	if r.ArtifactHash != "" && !validSHA256Ref(r.ArtifactHash) {
 		errs = append(errs, errors.New("artifact_hash must be sha256:<64 hex chars>"))
 	}
-	if len(r.ResultPreview) > 0 {
-		data, err := json.Marshal(r.ResultPreview)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("result_preview must be JSON-serializable: %w", err))
-		} else if len(data) > MaxRuntimeResultPreviewBytes {
-			errs = append(errs, fmt.Errorf("result_preview must be at most %d bytes", MaxRuntimeResultPreviewBytes))
-		}
+	if err := ValidateRuntimeResultPreview(r.ResultPreview); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

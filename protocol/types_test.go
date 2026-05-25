@@ -109,6 +109,18 @@ func TestRuntimeExecutionResultValidatesTimingAndPreview(t *testing.T) {
 	}
 }
 
+func TestValidateRuntimeResultPreview(t *testing.T) {
+	if err := protocol.ValidateRuntimeResultPreview(map[string]any{"ok": true}); err != nil {
+		t.Fatalf("bounded preview rejected: %v", err)
+	}
+	if err := protocol.ValidateRuntimeResultPreview(map[string]any{"payload": strings.Repeat("x", protocol.MaxRuntimeResultPreviewBytes+1)}); err == nil || !strings.Contains(err.Error(), "result_preview") {
+		t.Fatalf("expected oversized preview error, got %v", err)
+	}
+	if err := protocol.ValidateRuntimeResultPreview(map[string]any{"bad": func() {}}); err == nil || !strings.Contains(err.Error(), "JSON-serializable") {
+		t.Fatalf("expected JSON serialization error, got %v", err)
+	}
+}
+
 func TestRuntimeServiceResultValidatesSLOEvidence(t *testing.T) {
 	result := protocol.RuntimeServiceResult{
 		StartedAt:    time.Unix(1, 0).UTC(),
