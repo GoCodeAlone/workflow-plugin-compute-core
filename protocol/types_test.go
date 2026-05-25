@@ -371,6 +371,50 @@ func TestExecutorMatchesPlacementRequirements(t *testing.T) {
 	}
 }
 
+func TestExecutorCapabilitiesHaveResourceConstrainedMatch(t *testing.T) {
+	req := protocol.PlacementRequirements{
+		ExecutorProvider:      "sandboxed-command",
+		ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+		ProofTier:             protocol.ProofArtifactHash,
+	}
+
+	if !protocol.ResourceLimitsRequireResourceConstrainedExecutor(protocol.ResourceLimits{CPUPercent: 50}) {
+		t.Fatal("cpu_percent limits should require resource-constrained executor")
+	}
+	if !protocol.ResourceLimitsRequireResourceConstrainedExecutor(protocol.ResourceLimits{MemoryBytes: 128 << 20}) {
+		t.Fatal("memory_bytes limits should require resource-constrained executor")
+	}
+	if protocol.ResourceLimitsRequireResourceConstrainedExecutor(protocol.ResourceLimits{WorkspaceBytes: 1 << 30}) {
+		t.Fatal("workspace-only limits should not require resource-constrained executor")
+	}
+
+	if protocol.ExecutorCapabilitiesHaveResourceConstrainedMatch(req, protocol.ExecutorCapabilities{
+		Executors: []protocol.ExecutorRef{{
+			Provider:              "command",
+			ExecutionSecurityTier: protocol.ExecutionTrustedNative,
+			ProofTier:             protocol.ProofReceiptOnly,
+		}},
+	}) {
+		t.Fatal("trusted native executor should not satisfy resource-constrained placement")
+	}
+
+	if !protocol.ExecutorCapabilitiesHaveResourceConstrainedMatch(req, protocol.ExecutorCapabilities{
+		Executors: []protocol.ExecutorRef{{
+			Provider:              "sandboxed-command",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+		}},
+	}) {
+		t.Fatal("matching sandboxed executor should satisfy resource-constrained placement")
+	}
+
+	if !protocol.ExecutorCapabilitiesHaveResourceConstrainedMatch(protocol.PlacementRequirements{}, protocol.ExecutorCapabilities{
+		ExecutionTiers: []protocol.ExecutionSecurityTier{protocol.ExecutionSandboxedContainer},
+	}) {
+		t.Fatal("legacy tier-only capabilities should satisfy when they include a constrained tier")
+	}
+}
+
 func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	limits := protocol.ResourceLimits{
 		CPUPercent:     -1,
