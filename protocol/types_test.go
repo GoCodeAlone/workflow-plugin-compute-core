@@ -433,6 +433,45 @@ func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	}
 }
 
+func TestValidateResourceLimitsAgainstCapacity(t *testing.T) {
+	limits := protocol.ResourceLimits{
+		CPUPercent:     1_100,
+		MemoryBytes:    64 << 30,
+		WorkspaceBytes: 1 << 40,
+	}
+	capacity := protocol.ResourceCapacity{
+		CPUCount:    4,
+		MemoryBytes: 8 << 30,
+		DiskBytes:   20 << 30,
+	}
+
+	err := protocol.ValidateResourceLimitsAgainstCapacity(limits, capacity)
+	if err == nil {
+		t.Fatal("expected oversized resource limits to fail")
+	}
+	for _, want := range []string{
+		"resource_limits.cpu_percent 1100 exceeds worker CPU capacity 400",
+		"resource_limits.memory_bytes",
+		"resource_limits.workspace_bytes",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected resource capacity error to contain %q, got %v", want, err)
+		}
+	}
+
+	if err := protocol.ValidateResourceLimitsAgainstCapacity(protocol.ResourceLimits{
+		CPUPercent:     400,
+		MemoryBytes:    8 << 30,
+		WorkspaceBytes: 20 << 30,
+	}, capacity); err != nil {
+		t.Fatalf("limits at capacity should pass: %v", err)
+	}
+
+	if err := protocol.ValidateResourceLimitsAgainstCapacity(limits, protocol.ResourceCapacity{}); err != nil {
+		t.Fatalf("unknown capacity should not reject limits: %v", err)
+	}
+}
+
 func TestProviderContractRejectsMalformedConfigSchemaDigest(t *testing.T) {
 	contract := validBatchProviderContract()
 	contract.ConfigSchemaDigest = "sha256:not-hex"
