@@ -240,6 +240,65 @@ func TestRuntimeAdapterContractRequiresServiceWorkloadForServiceAdapters(t *test
 	}
 }
 
+func TestPlacementConstraintsSatisfiedByEvaluatesWorkerAndTaskInputs(t *testing.T) {
+	constraints := protocol.PlacementConstraints{
+		MinDiskBytes:         100,
+		MinMemoryBytes:       200,
+		MinBandwidthMbps:     300,
+		RequiresIngress:      true,
+		RequiredCapabilities: []string{"gpu", "tee"},
+	}
+
+	err := protocol.PlacementConstraintsSatisfiedBy(
+		constraints,
+		protocol.PlacementCapabilities{
+			DiskBytes:     50,
+			MemoryBytes:   150,
+			BandwidthMbps: 250,
+			CapabilityTags: []string{
+				"gpu",
+			},
+		},
+		protocol.PlacementNetworkPolicy{},
+	)
+	if err == nil {
+		t.Fatal("expected insufficient placement inputs to fail")
+	}
+	for _, want := range []string{
+		"disk_bytes",
+		"memory_bytes",
+		"bandwidth_mbps",
+		"ingress",
+		`required capability "tee"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected placement error to contain %q, got %v", want, err)
+		}
+	}
+
+	if err := protocol.PlacementConstraintsSatisfiedBy(
+		constraints,
+		protocol.PlacementCapabilities{
+			DiskBytes:      100,
+			MemoryBytes:    200,
+			BandwidthMbps:  300,
+			IngressCapable: true,
+			CapabilityTags: []string{"gpu", "tee"},
+		},
+		protocol.PlacementNetworkPolicy{AllowIngress: true},
+	); err != nil {
+		t.Fatalf("expected placement inputs to satisfy constraints: %v", err)
+	}
+
+	if err := protocol.PlacementConstraintsSatisfiedBy(
+		protocol.PlacementConstraints{},
+		protocol.PlacementCapabilities{},
+		protocol.PlacementNetworkPolicy{},
+	); err != nil {
+		t.Fatalf("zero constraints should be satisfied: %v", err)
+	}
+}
+
 func TestRuntimeDescriptorFallsBackToProviderNameAndDevVersion(t *testing.T) {
 	ref := (protocol.RuntimeDescriptor{}).ExecutorRef("command")
 
