@@ -2,6 +2,7 @@ package protocol_test
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -726,6 +727,65 @@ func TestProviderConformanceEvidenceRequiresArtifactDigestAndObservation(t *test
 	if err := evidence.Validate(); err == nil || !strings.Contains(err.Error(), "evidence_digest") {
 		t.Fatalf("expected evidence_digest error, got %v", err)
 	}
+}
+
+func TestProviderContractAppliesProviderConformanceEvidence(t *testing.T) {
+	contract := validBatchProviderContract()
+	profile := contract.RuntimeContract.Profiles[0]
+	evidence := protocol.ProviderConformanceEvidence{
+		ProtocolVersion:       protocol.Version,
+		ID:                    "example-real-client-evidence",
+		PluginID:              contract.PluginID,
+		ProviderID:            contract.ProviderID,
+		ContractID:            contract.ContractID,
+		Version:               contract.Version,
+		RuntimeProfileID:      profile.ID,
+		ConformanceProfile:    "upstream-client-v1",
+		UpstreamClientName:    "example-client",
+		UpstreamClientVersion: "1.2.3",
+		EvidenceRef:           "artifact://providers/example/evidence/upstream-client-v1",
+		EvidenceDigest:        protocol.CanonicalHash("evidence"),
+		ObservedAt:            time.Now().UTC(),
+	}
+
+	if err := contract.ApplyProviderConformanceEvidence(evidence); err != nil {
+		t.Fatalf("apply evidence: %v", err)
+	}
+	got := contract.RuntimeContract.Profiles[0]
+	if got.UpstreamClientConformance != protocol.UpstreamClientConformanceRealClient ||
+		got.UpstreamClientEvidenceRef != evidence.EvidenceRef ||
+		got.UpstreamClientEvidenceDigest != evidence.EvidenceDigest {
+		t.Fatalf("runtime profile evidence was not applied: %+v", got)
+	}
+	if !slices.Contains(got.ConformanceProfiles, evidence.ConformanceProfile) {
+		t.Fatalf("runtime profile missing conformance profile %q: %+v", evidence.ConformanceProfile, got.ConformanceProfiles)
+	}
+	if err := contract.ApplyProviderConformanceEvidence(evidence); err != nil {
+		t.Fatalf("reapply evidence: %v", err)
+	}
+	if got := contract.RuntimeContract.Profiles[0].ConformanceProfiles; countString(got, evidence.ConformanceProfile) != 1 {
+		t.Fatalf("runtime profile duplicated conformance profile %q: %+v", evidence.ConformanceProfile, got)
+	}
+
+	evidence.PluginID = "workflow-plugin-other"
+	if err := contract.ApplyProviderConformanceEvidence(evidence); err == nil || !strings.Contains(err.Error(), "does not match provider contract tuple") {
+		t.Fatalf("expected tuple mismatch error, got %v", err)
+	}
+	evidence.PluginID = contract.PluginID
+	evidence.RuntimeProfileID = "missing-runtime"
+	if err := contract.ApplyProviderConformanceEvidence(evidence); err == nil || !strings.Contains(err.Error(), "runtime profile") {
+		t.Fatalf("expected runtime profile mismatch error, got %v", err)
+	}
+}
+
+func countString(values []string, target string) int {
+	count := 0
+	for _, value := range values {
+		if value == target {
+			count++
+		}
+	}
+	return count
 }
 
 func validBatchProviderContract() protocol.ProviderContract {
