@@ -804,10 +804,93 @@ func TestDefaultProviderRuntimeContractBuildsRuntimeMatrix(t *testing.T) {
 			profile.UpstreamClientEvidenceDigest == "" {
 			t.Fatalf("runtime profile missing shared options: %+v", profile)
 		}
-		if !slices.Contains(profile.ConformanceProfiles, "service-oci-v1") ||
+		if len(profile.ConformanceProfiles) < 2 ||
 			!slices.Contains(profile.ConformanceProfiles, "upstream-client-v1") {
 			t.Fatalf("runtime profile missing default or option conformance profiles: %+v", profile.ConformanceProfiles)
 		}
+	}
+}
+
+func TestDefaultProviderRuntimeProfileMatchesKnownExecutorShapes(t *testing.T) {
+	tests := []struct {
+		executor               string
+		runtimeProfile         protocol.RuntimeProfile
+		conformanceProfile     string
+		writableRootFS         protocol.RuntimePermission
+		allowedCapabilities    []string
+		allowedMountRefs       []string
+		writablePaths          []string
+		imageDigestRequired    bool
+		rootFSDigestRequired   bool
+		hostWorkspaceSupported bool
+	}{
+		{
+			executor:               "sandboxed-command",
+			runtimeProfile:         protocol.RuntimeProfileSandboxedOCI,
+			conformanceProfile:     "sandboxed-oci-v1",
+			writableRootFS:         protocol.RuntimePermissionForbidden,
+			allowedMountRefs:       []string{"workspace"},
+			writablePaths:          []string{"/tmp"},
+			imageDigestRequired:    true,
+			rootFSDigestRequired:   true,
+			hostWorkspaceSupported: true,
+		},
+		{
+			executor:               "sandboxed-container-build",
+			runtimeProfile:         protocol.RuntimeProfileContainerBuild,
+			conformanceProfile:     "container-build-v1",
+			writableRootFS:         protocol.RuntimePermissionExplicit,
+			allowedCapabilities:    []string{"CHOWN", "FOWNER"},
+			allowedMountRefs:       []string{"workspace"},
+			writablePaths:          []string{"/tmp", "/wfcompute-build"},
+			imageDigestRequired:    true,
+			rootFSDigestRequired:   true,
+			hostWorkspaceSupported: true,
+		},
+		{
+			executor:               "node-service-sandboxed-container",
+			runtimeProfile:         protocol.RuntimeProfileServiceOCI,
+			conformanceProfile:     "service-oci-v1",
+			writableRootFS:         protocol.RuntimePermissionForbidden,
+			allowedMountRefs:       []string{"workspace", "node-data"},
+			writablePaths:          []string{"/tmp"},
+			imageDigestRequired:    true,
+			rootFSDigestRequired:   true,
+			hostWorkspaceSupported: true,
+		},
+		{
+			executor:               "wasm-component",
+			runtimeProfile:         protocol.RuntimeProfileWASMComponent,
+			conformanceProfile:     "wasm-component-v1",
+			writableRootFS:         protocol.RuntimePermissionForbidden,
+			imageDigestRequired:    false,
+			rootFSDigestRequired:   false,
+			hostWorkspaceSupported: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.executor, func(t *testing.T) {
+			profile := protocol.DefaultProviderRuntimeProfile(tc.executor, protocol.ExecutionSandboxedContainer, protocol.ProofArtifactHash)
+			if profile.RuntimeProfile != tc.runtimeProfile ||
+				profile.WritableRootFS != tc.writableRootFS ||
+				profile.ImageDigestRequired != tc.imageDigestRequired ||
+				profile.RootFSDigestRequired != tc.rootFSDigestRequired ||
+				profile.HostWorkspaceSupported != tc.hostWorkspaceSupported {
+				t.Fatalf("runtime profile mismatch: %+v", profile)
+			}
+			if !slices.Contains(profile.ConformanceProfiles, tc.conformanceProfile) {
+				t.Fatalf("missing conformance profile %q: %+v", tc.conformanceProfile, profile.ConformanceProfiles)
+			}
+			if !slices.Equal(profile.AllowedCapabilities, tc.allowedCapabilities) {
+				t.Fatalf("allowed capabilities = %+v, want %+v", profile.AllowedCapabilities, tc.allowedCapabilities)
+			}
+			if !slices.Equal(profile.AllowedMountRefs, tc.allowedMountRefs) {
+				t.Fatalf("allowed mount refs = %+v, want %+v", profile.AllowedMountRefs, tc.allowedMountRefs)
+			}
+			if !slices.Equal(profile.WritablePaths, tc.writablePaths) {
+				t.Fatalf("writable paths = %+v, want %+v", profile.WritablePaths, tc.writablePaths)
+			}
+		})
 	}
 }
 
