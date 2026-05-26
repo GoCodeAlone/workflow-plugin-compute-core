@@ -612,6 +612,84 @@ func TestHardwareCapabilitiesSatisfyPlacementRequirements(t *testing.T) {
 	}
 }
 
+func TestAttestationDecisionBindingDigest(t *testing.T) {
+	attestation := validAttestationDecision(protocol.ExecutionConfidentialCPU)
+	first := attestation.BindingDigest()
+	if first == "" || !strings.HasPrefix(first, "sha256:") {
+		t.Fatalf("binding digest = %q", first)
+	}
+
+	attestation.Signature.Value = "rotated-signature"
+	attestation.SignatureVerified = false
+	if got := attestation.BindingDigest(); got != first {
+		t.Fatalf("binding digest included signature-only fields: got %q want %q", got, first)
+	}
+
+	attestation.DecisionID = "attest-2"
+	if got := attestation.BindingDigest(); got == first {
+		t.Fatalf("binding digest did not include decision identity: %q", got)
+	}
+}
+
+func TestValidateAttestedProofBinding(t *testing.T) {
+	valid := validAttestedProofBinding(protocol.ExecutionConfidentialCPU)
+	if err := protocol.ValidateAttestedProofBinding(valid); err != nil {
+		t.Fatalf("valid attested proof binding rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*protocol.AttestedProofBinding){
+		"missing attestation": func(binding *protocol.AttestedProofBinding) {
+			binding.Verifier.Attestation = protocol.AttestationDecision{}
+		},
+		"missing key release": func(binding *protocol.AttestedProofBinding) {
+			binding.Verifier.KeyRelease = protocol.KeyReleaseDecision{}
+		},
+		"missing executor proof metadata": func(binding *protocol.AttestedProofBinding) {
+			binding.Executor.ProofTier = ""
+		},
+		"policy mismatch": func(binding *protocol.AttestedProofBinding) {
+			binding.Verifier.Attestation.PolicyID = "other-policy"
+		},
+		"task hash mismatch": func(binding *protocol.AttestedProofBinding) {
+			binding.Verifier.KeyRelease.TaskHash = "sha256:other-task"
+		},
+		"attestation digest mismatch": func(binding *protocol.AttestedProofBinding) {
+			binding.Verifier.KeyRelease.AttestationDigest = "sha256:other-attestation"
+		},
+		"started before attestation": func(binding *protocol.AttestedProofBinding) {
+			binding.StartedAt = time.Unix(98, 0).UTC()
+		},
+		"finished after key release": func(binding *protocol.AttestedProofBinding) {
+			binding.FinishedAt = time.Unix(121, 0).UTC()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			binding := valid
+			mutate(&binding)
+			if err := protocol.ValidateAttestedProofBinding(binding); err == nil {
+				t.Fatal("expected attested proof binding to fail")
+			}
+		})
+	}
+}
+
+func TestValidateAttestedProofBindingRequiresConfidentialGPUEvidence(t *testing.T) {
+	binding := validAttestedProofBinding(protocol.ExecutionConfidentialGPU)
+	binding.Verifier.Attestation.ConfidentialGPU = false
+	binding.Verifier.KeyRelease = validKeyReleaseDecisionFor(binding.Verifier.Attestation)
+
+	err := protocol.ValidateAttestedProofBinding(binding)
+	if err == nil || !strings.Contains(err.Error(), "confidential_gpu") {
+		t.Fatalf("expected confidential GPU evidence error, got %v", err)
+	}
+
+	binding.Verifier.Attestation.ConfidentialGPU = true
+	binding.Verifier.KeyRelease = validKeyReleaseDecisionFor(binding.Verifier.Attestation)
+	if err := protocol.ValidateAttestedProofBinding(binding); err != nil {
+		t.Fatalf("confidential GPU binding rejected: %v", err)
+	}
+}
+
 func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	limits := protocol.ResourceLimits{
 		CPUPercent:     -1,
@@ -627,6 +705,86 @@ func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 		!strings.Contains(err.Error(), "runtime_seconds") ||
 		!strings.Contains(err.Error(), "output_bytes") {
 		t.Fatalf("expected resource limit errors, got %v", err)
+	}
+}
+
+func validAttestedProofBinding(tier protocol.ExecutionSecurityTier) protocol.AttestedProofBinding {
+	attestation := validAttestationDecision(tier)
+	return protocol.AttestedProofBinding{
+		Executor: protocol.ExecutorRef{
+			Provider:              "confidential-command",
+			Version:               "dev",
+			ExecutionSecurityTier: tier,
+			ProofTier:             protocol.ProofAttestedReceipt,
+			ImageDigest:           "sha256:image",
+			RootFSDigest:          "sha256:rootfs",
+		},
+		PolicyID:              "policy-1",
+		TaskID:                "task-1",
+		TaskHash:              "sha256:task",
+		InputHash:             "sha256:input",
+		DependencyClosureHash: "sha256:deps",
+		WorkerID:              "worker-1",
+		PoolID:                "pool-1",
+		StartedAt:             time.Unix(100, 0).UTC(),
+		FinishedAt:            time.Unix(101, 0).UTC(),
+		Verifier: protocol.VerifierResult{
+			Provider:    "attestation_key_release",
+			Status:      protocol.VerificationAccepted,
+			Attestation: attestation,
+			KeyRelease:  validKeyReleaseDecisionFor(attestation),
+		},
+	}
+}
+
+func validAttestationDecision(tier protocol.ExecutionSecurityTier) protocol.AttestationDecision {
+	return protocol.AttestationDecision{
+		Provider:             "fake-attestation",
+		VerifierID:           "verifier-1",
+		DecisionID:           "attest-1",
+		HardwareClass:        string(tier),
+		ExecutorImageDigest:  "sha256:image",
+		ExecutorRootFSDigest: "sha256:rootfs",
+		PolicyID:             "policy-1",
+		Nonce:                "nonce-1",
+		IssuedAt:             time.Unix(99, 0).UTC(),
+		ExpiresAt:            time.Unix(120, 0).UTC(),
+		SignatureVerified:    true,
+		ConfidentialGPU:      tier == protocol.ExecutionConfidentialGPU,
+		Signature: protocol.SignatureEnvelope{
+			Algorithm: "ed25519",
+			KeyID:     "attestation-key",
+			Value:     "sig",
+			Verified:  true,
+		},
+	}
+}
+
+func validKeyReleaseDecisionFor(attestation protocol.AttestationDecision) protocol.KeyReleaseDecision {
+	return protocol.KeyReleaseDecision{
+		Provider:              "fake-key-release",
+		DecisionID:            "key-release-1",
+		AttestationDecisionID: "attest-1",
+		AttestationDigest:     attestation.BindingDigest(),
+		AttestationProvider:   attestation.Provider,
+		AttestationVerifierID: attestation.VerifierID,
+		AttestationKeyID:      attestation.Signature.KeyID,
+		PolicyID:              "policy-1",
+		TaskID:                "task-1",
+		TaskHash:              "sha256:task",
+		InputHash:             "sha256:input",
+		DependencyClosureHash: "sha256:deps",
+		WorkerID:              "worker-1",
+		PoolID:                "pool-1",
+		KeyRefHash:            "sha256:key-ref",
+		Released:              true,
+		ExpiresAt:             time.Unix(120, 0).UTC(),
+		Signature: protocol.SignatureEnvelope{
+			Algorithm: "ed25519",
+			KeyID:     "key-release-key",
+			Value:     "sig",
+			Verified:  true,
+		},
 	}
 }
 
