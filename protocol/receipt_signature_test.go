@@ -49,6 +49,35 @@ func TestCredentialReceiptSignaturesBindPayloadAndToken(t *testing.T) {
 	}
 }
 
+func TestCredentialReceiptSignaturesRejectEmptyTokenProofKey(t *testing.T) {
+	proof := testProofReceipt()
+	if got := CredentialProofSignature(proof, ""); got != "" {
+		t.Fatalf("CredentialProofSignature(empty key) = %q, want empty", got)
+	}
+	proof.AgentSignature = CredentialProofSignature(proof, TokenProofKey("agent-token"))
+	if VerifyCredentialProofSignature(proof, "") {
+		t.Fatal("proof credential signature verified with empty token proof key")
+	}
+
+	service := testServiceReceipt()
+	if got := CredentialServiceSignature(service, ""); got != "" {
+		t.Fatalf("CredentialServiceSignature(empty key) = %q, want empty", got)
+	}
+	service.AgentSignature = CredentialServiceSignature(service, TokenProofKey("agent-token"))
+	if VerifyCredentialServiceSignature(service, "") {
+		t.Fatal("service credential signature verified with empty token proof key")
+	}
+
+	edge := testEdgeRequestReceipt()
+	if got := CredentialEdgeSignature(edge, ""); got != "" {
+		t.Fatalf("CredentialEdgeSignature(empty key) = %q, want empty", got)
+	}
+	edge.RouterSignature = CredentialEdgeSignature(edge, TokenProofKey("router-token"))
+	if VerifyCredentialEdgeSignature(edge, "") {
+		t.Fatal("edge credential signature verified with empty token proof key")
+	}
+}
+
 func TestSoftwareReceiptSignaturesDoNotSatisfyCredentialVerification(t *testing.T) {
 	proof := testProofReceipt()
 	proof.AgentSignature = SoftwareAgentProofSignature(proof)
@@ -95,12 +124,40 @@ func TestVerifyServiceReceiptRequiresDigestAndSignaturePolicy(t *testing.T) {
 	}
 
 	credential := testServiceReceipt()
-	credential.AgentSignature = CredentialServiceSignature(credential, TokenProofKey("agent-token"))
+	key := TokenProofKey("agent-token")
+	credential.AgentSignature = CredentialServiceSignature(credential, key)
 	if _, err := VerifyServiceReceipt(credential, ReceiptVerificationOptions{}); err == nil || !strings.Contains(err.Error(), "agent_signature") {
 		t.Fatalf("VerifyServiceReceipt() error = %v, want credential verification gate", err)
 	}
-	if _, err := VerifyServiceReceipt(credential, ReceiptVerificationOptions{CredentialSignatureVerified: true}); err != nil {
+	if _, err := VerifyServiceReceipt(credential, ReceiptVerificationOptions{CredentialTokenProofKey: key}); err != nil {
 		t.Fatalf("VerifyServiceReceipt() credential verified error = %v", err)
+	}
+
+	malformed := credential
+	malformed.AgentSignature = CredentialProofSignaturePrefix + "not-hex"
+	if _, err := VerifyServiceReceipt(malformed, ReceiptVerificationOptions{CredentialTokenProofKey: key}); err == nil || !strings.Contains(err.Error(), "agent_signature") {
+		t.Fatalf("VerifyServiceReceipt() error = %v, want malformed credential signature rejection", err)
+	}
+
+	nested := receipt
+	nested.SLOEvidence.DeadlineMS = -1
+	nested.AgentSignature = SoftwareAgentServiceSignature(nested)
+	if _, err := VerifyServiceReceipt(nested, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err == nil || !strings.Contains(err.Error(), "deadline_ms") {
+		t.Fatalf("VerifyServiceReceipt() error = %v, want nested slo validation", err)
+	}
+
+	nested = receipt
+	nested.StatusEvidence.CommandHash = "not-a-digest"
+	nested.AgentSignature = SoftwareAgentServiceSignature(nested)
+	if _, err := VerifyServiceReceipt(nested, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err == nil || !strings.Contains(err.Error(), "command_hash") {
+		t.Fatalf("VerifyServiceReceipt() error = %v, want nested status evidence validation", err)
+	}
+
+	nested = receipt
+	nested.ResourceLimits.CPUPercent = -1
+	nested.AgentSignature = SoftwareAgentServiceSignature(nested)
+	if _, err := VerifyServiceReceipt(nested, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err == nil || !strings.Contains(err.Error(), "cpu_percent") {
+		t.Fatalf("VerifyServiceReceipt() error = %v, want nested resource limit validation", err)
 	}
 }
 
@@ -121,12 +178,33 @@ func TestVerifyEdgeRequestReceiptRequiresDigestAndSignaturePolicy(t *testing.T) 
 	}
 
 	credential := testEdgeRequestReceipt()
-	credential.RouterSignature = CredentialEdgeSignature(credential, TokenProofKey("router-token"))
+	key := TokenProofKey("router-token")
+	credential.RouterSignature = CredentialEdgeSignature(credential, key)
 	if _, err := VerifyEdgeRequestReceipt(credential, ReceiptVerificationOptions{}); err == nil || !strings.Contains(err.Error(), "router_signature") {
 		t.Fatalf("VerifyEdgeRequestReceipt() error = %v, want credential verification gate", err)
 	}
-	if _, err := VerifyEdgeRequestReceipt(credential, ReceiptVerificationOptions{CredentialSignatureVerified: true}); err != nil {
+	if _, err := VerifyEdgeRequestReceipt(credential, ReceiptVerificationOptions{CredentialTokenProofKey: key}); err != nil {
 		t.Fatalf("VerifyEdgeRequestReceipt() credential verified error = %v", err)
+	}
+
+	malformed := credential
+	malformed.RouterSignature = CredentialProofSignaturePrefix + "not-hex"
+	if _, err := VerifyEdgeRequestReceipt(malformed, ReceiptVerificationOptions{CredentialTokenProofKey: key}); err == nil || !strings.Contains(err.Error(), "router_signature") {
+		t.Fatalf("VerifyEdgeRequestReceipt() error = %v, want malformed credential signature rejection", err)
+	}
+}
+
+func TestProofReceiptValidateRequiresDigestFields(t *testing.T) {
+	receipt := testProofReceipt()
+	receipt.AgentSignature = SoftwareAgentProofSignature(receipt)
+	receipt.Verifier = VerifierResult{Provider: "signed_receipt", Status: VerificationAccepted}
+	if err := receipt.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	receipt.ArtifactHash = "sha256:not-hex"
+	if err := receipt.Validate(); err == nil || !strings.Contains(err.Error(), "artifact_hash") {
+		t.Fatalf("Validate() error = %v, want artifact_hash digest rejection", err)
 	}
 }
 

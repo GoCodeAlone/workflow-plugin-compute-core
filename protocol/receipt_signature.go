@@ -94,10 +94,10 @@ type EdgeRequestReceipt struct {
 }
 
 type ReceiptVerificationOptions struct {
-	CredentialSignatureVerified bool
-	AllowSoftwareFallback       bool
-	VerifierProvider            string
-	VerifierMessage             string
+	CredentialTokenProofKey string
+	AllowSoftwareFallback   bool
+	VerifierProvider        string
+	VerifierMessage         string
 }
 
 func TokenProofKey(token string) string {
@@ -128,6 +128,9 @@ func SoftwareRouterEdgeSignature(receipt EdgeRequestReceipt) string {
 }
 
 func CredentialProofSignature(receipt ProofReceipt, tokenProofKey string) string {
+	if tokenProofKey == "" {
+		return ""
+	}
 	receipt.AgentSignature = ""
 	mac := hmac.New(sha256.New, []byte(tokenProofKey))
 	_, _ = mac.Write([]byte(CanonicalHash(receipt)))
@@ -135,6 +138,9 @@ func CredentialProofSignature(receipt ProofReceipt, tokenProofKey string) string
 }
 
 func CredentialServiceSignature(receipt ServiceReceipt, tokenProofKey string) string {
+	if tokenProofKey == "" {
+		return ""
+	}
 	receipt.AgentSignature = ""
 	if !receipt.Executor.RequiresAttestation() {
 		receipt.Verifier = VerifierResult{}
@@ -145,6 +151,9 @@ func CredentialServiceSignature(receipt ServiceReceipt, tokenProofKey string) st
 }
 
 func CredentialEdgeSignature(receipt EdgeRequestReceipt, tokenProofKey string) string {
+	if tokenProofKey == "" {
+		return ""
+	}
 	receipt.RouterSignature = ""
 	receipt.Verifier = VerifierResult{}
 	mac := hmac.New(sha256.New, []byte(tokenProofKey))
@@ -153,6 +162,9 @@ func CredentialEdgeSignature(receipt EdgeRequestReceipt, tokenProofKey string) s
 }
 
 func VerifyCredentialProofSignature(receipt ProofReceipt, tokenProofKey string) bool {
+	if tokenProofKey == "" {
+		return false
+	}
 	if !strings.HasPrefix(receipt.AgentSignature, CredentialProofSignaturePrefix) {
 		return false
 	}
@@ -161,6 +173,9 @@ func VerifyCredentialProofSignature(receipt ProofReceipt, tokenProofKey string) 
 }
 
 func VerifyCredentialServiceSignature(receipt ServiceReceipt, tokenProofKey string) bool {
+	if tokenProofKey == "" {
+		return false
+	}
 	if !strings.HasPrefix(receipt.AgentSignature, CredentialProofSignaturePrefix) {
 		return false
 	}
@@ -169,6 +184,9 @@ func VerifyCredentialServiceSignature(receipt ServiceReceipt, tokenProofKey stri
 }
 
 func VerifyCredentialEdgeSignature(receipt EdgeRequestReceipt, tokenProofKey string) bool {
+	if tokenProofKey == "" {
+		return false
+	}
 	if !strings.HasPrefix(receipt.RouterSignature, CredentialProofSignaturePrefix) {
 		return false
 	}
@@ -241,14 +259,14 @@ func receiptVerifierResult(opts ReceiptVerificationOptions, defaultMessage strin
 
 func serviceReceiptSignatureValid(receipt ServiceReceipt, opts ReceiptVerificationOptions) bool {
 	if strings.HasPrefix(receipt.AgentSignature, CredentialProofSignaturePrefix) {
-		return opts.CredentialSignatureVerified
+		return VerifyCredentialServiceSignature(receipt, opts.CredentialTokenProofKey)
 	}
 	return opts.AllowSoftwareFallback && receipt.AgentSignature == SoftwareAgentServiceSignature(receipt)
 }
 
 func edgeRequestReceiptSignatureValid(receipt EdgeRequestReceipt, opts ReceiptVerificationOptions) bool {
 	if strings.HasPrefix(receipt.RouterSignature, CredentialProofSignaturePrefix) {
-		return opts.CredentialSignatureVerified
+		return VerifyCredentialEdgeSignature(receipt, opts.CredentialTokenProofKey)
 	}
 	return opts.AllowSoftwareFallback && receipt.RouterSignature == SoftwareRouterEdgeSignature(receipt)
 }
@@ -267,6 +285,19 @@ func (r ProofReceipt) Validate() error {
 	require("task_hash", r.TaskHash)
 	require("input_hash", r.InputHash)
 	require("dependency_closure_hash", r.DependencyClosureHash)
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "task_hash", value: r.TaskHash},
+		{name: "input_hash", value: r.InputHash},
+		{name: "dependency_closure_hash", value: r.DependencyClosureHash},
+		{name: "artifact_hash", value: r.ArtifactHash},
+	} {
+		if field.value != "" && !validSHA256Digest(field.value) {
+			errs = append(errs, fmt.Errorf("%s must use sha256 digest", field.name))
+		}
+	}
 	if err := r.Executor.ValidateForProof(); err != nil {
 		errs = append(errs, err)
 	}
@@ -374,11 +405,14 @@ func (r ServiceReceipt) Validate() error {
 	if !r.StartedAt.IsZero() && !r.FinishedAt.IsZero() && r.FinishedAt.Before(r.StartedAt) {
 		errs = append(errs, errors.New("finished_at must be after started_at"))
 	}
-	if r.SLOEvidence.StatusCode <= 0 {
-		errs = append(errs, errors.New("slo_evidence.status_code is required"))
+	if err := r.ResourceLimits.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("resource_limits: %w", err))
 	}
-	if r.SLOEvidence.LatencyMillis <= 0 {
-		errs = append(errs, errors.New("slo_evidence.latency_millis is required"))
+	if err := r.SLOEvidence.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("slo_evidence: %w", err))
+	}
+	if err := r.StatusEvidence.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("status_evidence: %w", err))
 	}
 	return errors.Join(errs...)
 }
