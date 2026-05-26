@@ -690,6 +690,83 @@ func TestValidateAttestedProofBindingRequiresConfidentialGPUEvidence(t *testing.
 	}
 }
 
+func TestValidateAttestedServiceBinding(t *testing.T) {
+	valid := validAttestedServiceBinding(protocol.ExecutionConfidentialCPU)
+	if err := protocol.ValidateAttestedServiceBinding(valid); err != nil {
+		t.Fatalf("valid attested service binding rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*protocol.AttestedServiceBinding){
+		"missing attestation": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.Attestation = protocol.AttestationDecision{}
+		},
+		"missing key release": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.KeyRelease = protocol.KeyReleaseDecision{}
+		},
+		"policy mismatch": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.Attestation.PolicyID = "other-policy"
+		},
+		"deployment mismatch": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.KeyRelease.DependencyClosureHash = "sha256:other-deployment"
+		},
+		"worker mismatch": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.KeyRelease.WorkerID = "other-worker"
+		},
+		"pool mismatch": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.KeyRelease.PoolID = "other-pool"
+		},
+		"attestation digest mismatch": func(binding *protocol.AttestedServiceBinding) {
+			binding.Verifier.KeyRelease.AttestationDigest = "sha256:other-attestation"
+		},
+		"started before attestation": func(binding *protocol.AttestedServiceBinding) {
+			binding.StartedAt = time.Unix(98, 0).UTC()
+		},
+		"finished after key release": func(binding *protocol.AttestedServiceBinding) {
+			binding.FinishedAt = time.Unix(121, 0).UTC()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			binding := valid
+			mutate(&binding)
+			if err := protocol.ValidateAttestedServiceBinding(binding); err == nil {
+				t.Fatal("expected attested service binding to fail")
+			}
+		})
+	}
+}
+
+func TestValidateAttestedServiceBindingAllowsExistingOptionalKeyReleaseMetadata(t *testing.T) {
+	binding := validAttestedServiceBinding(protocol.ExecutionConfidentialCPU)
+	binding.Verifier.KeyRelease.PolicyID = ""
+	binding.Verifier.KeyRelease.TaskID = ""
+	binding.Verifier.KeyRelease.TaskHash = ""
+	binding.Verifier.KeyRelease.InputHash = ""
+	binding.Verifier.KeyRelease.DependencyClosureHash = ""
+	binding.Verifier.KeyRelease.WorkerID = ""
+	binding.Verifier.KeyRelease.PoolID = ""
+
+	if err := protocol.ValidateAttestedServiceBinding(binding); err != nil {
+		t.Fatalf("service binding with optional key-release metadata omitted rejected: %v", err)
+	}
+}
+
+func TestValidateAttestedServiceBindingRequiresConfidentialGPUEvidence(t *testing.T) {
+	binding := validAttestedServiceBinding(protocol.ExecutionConfidentialGPU)
+	binding.Verifier.Attestation.ConfidentialGPU = false
+	binding.Verifier.KeyRelease = validKeyReleaseDecisionFor(binding.Verifier.Attestation)
+
+	err := protocol.ValidateAttestedServiceBinding(binding)
+	if err == nil || !strings.Contains(err.Error(), "confidential_gpu") {
+		t.Fatalf("expected confidential GPU evidence error, got %v", err)
+	}
+
+	binding.Verifier.Attestation.ConfidentialGPU = true
+	binding.Verifier.KeyRelease = validKeyReleaseDecisionFor(binding.Verifier.Attestation)
+	if err := protocol.ValidateAttestedServiceBinding(binding); err != nil {
+		t.Fatalf("confidential GPU service binding rejected: %v", err)
+	}
+}
+
 func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	limits := protocol.ResourceLimits{
 		CPUPercent:     -1,
@@ -705,6 +782,33 @@ func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 		!strings.Contains(err.Error(), "runtime_seconds") ||
 		!strings.Contains(err.Error(), "output_bytes") {
 		t.Fatalf("expected resource limit errors, got %v", err)
+	}
+}
+
+func validAttestedServiceBinding(tier protocol.ExecutionSecurityTier) protocol.AttestedServiceBinding {
+	attestation := validAttestationDecision(tier)
+	return protocol.AttestedServiceBinding{
+		Executor: protocol.ExecutorRef{
+			Provider:              "confidential-service",
+			Version:               "dev",
+			ExecutionSecurityTier: tier,
+			ProofTier:             protocol.ProofAttestedReceipt,
+			ImageDigest:           "sha256:image",
+			RootFSDigest:          "sha256:rootfs",
+		},
+		PolicyID:       "policy-1",
+		TaskID:         "task-1",
+		DeploymentHash: "sha256:deps",
+		WorkerID:       "worker-1",
+		PoolID:         "pool-1",
+		StartedAt:      time.Unix(100, 0).UTC(),
+		FinishedAt:     time.Unix(101, 0).UTC(),
+		Verifier: protocol.VerifierResult{
+			Provider:    "attestation_key_release",
+			Status:      protocol.VerificationAccepted,
+			Attestation: attestation,
+			KeyRelease:  validKeyReleaseDecisionFor(attestation),
+		},
 	}
 }
 

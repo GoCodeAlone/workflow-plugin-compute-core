@@ -334,6 +334,18 @@ type AttestedProofBinding struct {
 	Verifier              VerifierResult `json:"verifier"`
 }
 
+type AttestedServiceBinding struct {
+	Executor       ExecutorRef    `json:"executor"`
+	PolicyID       string         `json:"policy_id"`
+	TaskID         string         `json:"task_id"`
+	DeploymentHash string         `json:"deployment_hash"`
+	WorkerID       string         `json:"worker_id"`
+	PoolID         string         `json:"pool_id"`
+	StartedAt      time.Time      `json:"started_at"`
+	FinishedAt     time.Time      `json:"finished_at"`
+	Verifier       VerifierResult `json:"verifier"`
+}
+
 func ValidateAttestedProofBinding(binding AttestedProofBinding) error {
 	var errs []error
 	require := func(name, value string) {
@@ -444,6 +456,100 @@ func ValidateAttestedProofBinding(binding AttestedProofBinding) error {
 	}
 	if keyRelease.DependencyClosureHash != "" && keyRelease.DependencyClosureHash != binding.DependencyClosureHash {
 		errs = append(errs, errors.New("verifier.key_release.dependency_closure_hash must match receipt dependency_closure_hash"))
+	}
+	if keyRelease.WorkerID != "" && keyRelease.WorkerID != binding.WorkerID {
+		errs = append(errs, errors.New("verifier.key_release.worker_id must match receipt worker_id"))
+	}
+	if keyRelease.PoolID != "" && keyRelease.PoolID != binding.PoolID {
+		errs = append(errs, errors.New("verifier.key_release.pool_id must match receipt pool_id"))
+	}
+	if !keyRelease.ExpiresAt.IsZero() && !attestation.ExpiresAt.IsZero() && keyRelease.ExpiresAt.After(attestation.ExpiresAt) {
+		errs = append(errs, errors.New("verifier.key_release.expires_at must not exceed verifier.attestation.expires_at"))
+	}
+	if !binding.StartedAt.IsZero() && !attestation.IssuedAt.IsZero() && binding.StartedAt.Before(attestation.IssuedAt) {
+		errs = append(errs, errors.New("started_at must not precede verifier.attestation.issued_at"))
+	}
+	if !binding.FinishedAt.IsZero() && !attestation.ExpiresAt.IsZero() && binding.FinishedAt.After(attestation.ExpiresAt) {
+		errs = append(errs, errors.New("finished_at must not exceed verifier.attestation.expires_at"))
+	}
+	if !binding.FinishedAt.IsZero() && !keyRelease.ExpiresAt.IsZero() && binding.FinishedAt.After(keyRelease.ExpiresAt) {
+		errs = append(errs, errors.New("finished_at must not exceed verifier.key_release.expires_at"))
+	}
+
+	return errors.Join(errs...)
+}
+
+func ValidateAttestedServiceBinding(binding AttestedServiceBinding) error {
+	var errs []error
+	require := func(name, value string) {
+		if value == "" {
+			errs = append(errs, fmt.Errorf("%s is required", name))
+		}
+	}
+
+	if err := binding.Executor.ValidateForProof(); err != nil {
+		errs = append(errs, err)
+	}
+	require("verifier.provider", binding.Verifier.Provider)
+	if binding.Verifier.Status != VerificationAccepted {
+		errs = append(errs, fmt.Errorf("verifier.status must be %q", VerificationAccepted))
+	}
+
+	attestation := binding.Verifier.Attestation
+	require("verifier.attestation.provider", attestation.Provider)
+	require("verifier.attestation.verifier_id", attestation.VerifierID)
+	require("verifier.attestation.decision_id", attestation.DecisionID)
+	require("verifier.attestation.hardware_class", attestation.HardwareClass)
+	require("verifier.attestation.executor_image_digest", attestation.ExecutorImageDigest)
+	require("verifier.attestation.executor_rootfs_digest", attestation.ExecutorRootFSDigest)
+	require("verifier.attestation.policy_id", attestation.PolicyID)
+	if err := validateVerifiedSignature("verifier.attestation.signature", attestation.Signature); err != nil {
+		errs = append(errs, err)
+	}
+	if !attestation.SignatureVerified {
+		errs = append(errs, errors.New("verifier.attestation.signature_verified is required"))
+	}
+	if attestation.PolicyID != "" && attestation.PolicyID != binding.PolicyID {
+		errs = append(errs, errors.New("verifier.attestation.policy_id must match receipt policy_id"))
+	}
+	if attestation.HardwareClass != "" && attestation.HardwareClass != string(binding.Executor.ExecutionSecurityTier) {
+		errs = append(errs, errors.New("verifier.attestation.hardware_class must match executor.execution_security_tier"))
+	}
+	if attestation.ExecutorImageDigest != "" && attestation.ExecutorImageDigest != binding.Executor.ImageDigest {
+		errs = append(errs, errors.New("verifier.attestation.executor_image_digest must match executor.image_digest"))
+	}
+	if attestation.ExecutorRootFSDigest != "" && attestation.ExecutorRootFSDigest != binding.Executor.RootFSDigest {
+		errs = append(errs, errors.New("verifier.attestation.executor_rootfs_digest must match executor.rootfs_digest"))
+	}
+	if binding.Executor.ExecutionSecurityTier == ExecutionConfidentialGPU && !attestation.ConfidentialGPU {
+		errs = append(errs, errors.New("verifier.attestation.confidential_gpu is required for confidential GPU execution"))
+	}
+
+	keyRelease := binding.Verifier.KeyRelease
+	require("verifier.key_release.decision_id", keyRelease.DecisionID)
+	require("verifier.key_release.attestation_decision_id", keyRelease.AttestationDecisionID)
+	require("verifier.key_release.attestation_digest", keyRelease.AttestationDigest)
+	require("verifier.key_release.key_ref_hash", keyRelease.KeyRefHash)
+	if err := validateVerifiedSignature("verifier.key_release.signature", keyRelease.Signature); err != nil {
+		errs = append(errs, err)
+	}
+	if !keyRelease.Released {
+		errs = append(errs, errors.New("verifier.key_release.released is required"))
+	}
+	if keyRelease.AttestationDecisionID != "" && attestation.DecisionID != "" && keyRelease.AttestationDecisionID != attestation.DecisionID {
+		errs = append(errs, errors.New("verifier.key_release.attestation_decision_id must match verifier.attestation.decision_id"))
+	}
+	if keyRelease.AttestationDigest != "" && keyRelease.AttestationDigest != attestation.BindingDigest() {
+		errs = append(errs, errors.New("verifier.key_release.attestation_digest must match verifier.attestation digest"))
+	}
+	if keyRelease.PolicyID != "" && keyRelease.PolicyID != binding.PolicyID {
+		errs = append(errs, errors.New("verifier.key_release.policy_id must match receipt policy_id"))
+	}
+	if keyRelease.TaskID != "" && keyRelease.TaskID != binding.TaskID {
+		errs = append(errs, errors.New("verifier.key_release.task_id must match receipt task_id"))
+	}
+	if keyRelease.DependencyClosureHash != "" && keyRelease.DependencyClosureHash != binding.DeploymentHash {
+		errs = append(errs, errors.New("verifier.key_release.dependency_closure_hash must match receipt deployment_hash"))
 	}
 	if keyRelease.WorkerID != "" && keyRelease.WorkerID != binding.WorkerID {
 		errs = append(errs, errors.New("verifier.key_release.worker_id must match receipt worker_id"))
