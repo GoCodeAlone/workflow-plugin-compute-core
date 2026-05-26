@@ -486,6 +486,132 @@ func TestValidatePlacementRequirementsAgainstCapabilities(t *testing.T) {
 	}
 }
 
+func TestRequiredHardwareClass(t *testing.T) {
+	for name, tc := range map[string]struct {
+		req  protocol.PlacementRequirements
+		want string
+	}{
+		"explicit": {
+			req:  protocol.PlacementRequirements{HardwareClass: "sev-snp"},
+			want: "sev-snp",
+		},
+		"confidential cpu": {
+			req:  protocol.PlacementRequirements{ExecutionSecurityTier: protocol.ExecutionConfidentialCPU},
+			want: "confidential-cpu",
+		},
+		"confidential gpu": {
+			req:  protocol.PlacementRequirements{ExecutionSecurityTier: protocol.ExecutionConfidentialGPU},
+			want: "confidential-gpu",
+		},
+		"none": {
+			req: protocol.PlacementRequirements{},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := protocol.RequiredHardwareClass(tc.req); got != tc.want {
+				t.Fatalf("RequiredHardwareClass() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHardwareCapabilitiesSatisfyPlacementRequirements(t *testing.T) {
+	now := time.Date(2026, 5, 26, 5, 0, 0, 0, time.UTC)
+	verifiedCPU := protocol.HardwareAttestation{
+		Class:      "confidential-cpu",
+		Provider:   "sev-snp",
+		VerifierID: "verifier-1",
+		KeyID:      "key-1",
+		Verified:   true,
+		ExpiresAt:  now.Add(time.Hour),
+	}
+	verifiedGPU := protocol.HardwareAttestation{
+		Class:      "confidential-gpu",
+		Provider:   "nvidia-cc",
+		VerifierID: "verifier-1",
+		KeyID:      "key-1",
+		Verified:   true,
+		ExpiresAt:  now.Add(time.Hour),
+	}
+
+	for name, tc := range map[string]struct {
+		req  protocol.PlacementRequirements
+		caps protocol.HardwarePlacementCapabilities
+		want bool
+	}{
+		"confidential cpu requires verified attestation": {
+			req: protocol.PlacementRequirements{ExecutionSecurityTier: protocol.ExecutionConfidentialCPU},
+			caps: protocol.HardwarePlacementCapabilities{
+				Now: now,
+				Security: protocol.HardwareSecurityCapabilities{
+					HardwareAttestations: []protocol.HardwareAttestation{verifiedCPU},
+				},
+			},
+			want: true,
+		},
+		"confidential cpu rejects expired attestation": {
+			req: protocol.PlacementRequirements{ExecutionSecurityTier: protocol.ExecutionConfidentialCPU},
+			caps: protocol.HardwarePlacementCapabilities{
+				Now: now,
+				Security: protocol.HardwareSecurityCapabilities{HardwareAttestations: []protocol.HardwareAttestation{{
+					Class:      "confidential-cpu",
+					Provider:   "sev-snp",
+					VerifierID: "verifier-1",
+					KeyID:      "key-1",
+					Verified:   true,
+					ExpiresAt:  now.Add(-time.Second),
+				}}},
+			},
+		},
+		"confidential gpu requires gpu and verified attestation": {
+			req: protocol.PlacementRequirements{ExecutionSecurityTier: protocol.ExecutionConfidentialGPU},
+			caps: protocol.HardwarePlacementCapabilities{
+				GPUCount: 1,
+				Now:      now,
+				Security: protocol.HardwareSecurityCapabilities{
+					HardwareAttestations: []protocol.HardwareAttestation{verifiedGPU},
+				},
+			},
+			want: true,
+		},
+		"confidential gpu rejects missing gpu even with attestation": {
+			req: protocol.PlacementRequirements{ExecutionSecurityTier: protocol.ExecutionConfidentialGPU},
+			caps: protocol.HardwarePlacementCapabilities{Security: protocol.HardwareSecurityCapabilities{
+				HardwareAttestations: []protocol.HardwareAttestation{verifiedGPU},
+			}},
+		},
+		"custom class accepts hardware_classes": {
+			req: protocol.PlacementRequirements{HardwareClass: "arm-neoverse"},
+			caps: protocol.HardwarePlacementCapabilities{Security: protocol.HardwareSecurityCapabilities{
+				HardwareClasses: []string{"arm-neoverse"},
+			}},
+			want: true,
+		},
+		"custom class accepts tee": {
+			req: protocol.PlacementRequirements{HardwareClass: "sev-snp"},
+			caps: protocol.HardwarePlacementCapabilities{Security: protocol.HardwareSecurityCapabilities{
+				TEE: []string{"sev-snp"},
+			}},
+			want: true,
+		},
+		"custom class with confidential tier requires verified attestation": {
+			req: protocol.PlacementRequirements{
+				ExecutionSecurityTier: protocol.ExecutionConfidentialCPU,
+				HardwareClass:         "sev-snp",
+			},
+			caps: protocol.HardwarePlacementCapabilities{Security: protocol.HardwareSecurityCapabilities{
+				HardwareClasses: []string{"sev-snp"},
+			}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := protocol.HardwareCapabilitiesSatisfyPlacementRequirements(tc.req, tc.caps); got != tc.want {
+				t.Fatalf("HardwareCapabilitiesSatisfyPlacementRequirements() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResourceLimitsRejectNegativeValues(t *testing.T) {
 	limits := protocol.ResourceLimits{
 		CPUPercent:     -1,
