@@ -279,6 +279,27 @@ type ProviderCapabilityReport struct {
 	Reason   string                   `json:"reason,omitempty"`
 }
 
+type HardwareAttestation struct {
+	Class      string    `json:"class"`
+	Provider   string    `json:"provider"`
+	VerifierID string    `json:"verifier_id"`
+	KeyID      string    `json:"key_id"`
+	Verified   bool      `json:"verified"`
+	ExpiresAt  time.Time `json:"expires_at,omitzero"`
+}
+
+type HardwareSecurityCapabilities struct {
+	TEE                  []string              `json:"tee,omitempty"`
+	HardwareClasses      []string              `json:"hardware_classes,omitempty"`
+	HardwareAttestations []HardwareAttestation `json:"hardware_attestations,omitempty"`
+}
+
+type HardwarePlacementCapabilities struct {
+	GPUCount int                          `json:"gpu_count,omitempty"`
+	Security HardwareSecurityCapabilities `json:"security,omitzero"`
+	Now      time.Time                    `json:"now,omitzero"`
+}
+
 type PlacementRequirementCapabilities struct {
 	CapabilityTags    []string                   `json:"capability_tags,omitempty"`
 	ExecutorProviders []string                   `json:"executor_providers,omitempty"`
@@ -330,6 +351,55 @@ func ValidatePlacementRequirementsAgainstCapabilities(req PlacementRequirements,
 		errs = append(errs, errors.New("worker has no supported executor matching task placement requirements"))
 	}
 	return errors.Join(errs...)
+}
+
+func RequiredHardwareClass(req PlacementRequirements) string {
+	if req.HardwareClass != "" {
+		return req.HardwareClass
+	}
+	switch req.ExecutionSecurityTier {
+	case ExecutionConfidentialCPU:
+		return string(ExecutionConfidentialCPU)
+	case ExecutionConfidentialGPU:
+		return string(ExecutionConfidentialGPU)
+	default:
+		return ""
+	}
+}
+
+func PlacementRequiresVerifiedHardwareAttestation(req PlacementRequirements) bool {
+	return req.ExecutionSecurityTier == ExecutionConfidentialCPU || req.ExecutionSecurityTier == ExecutionConfidentialGPU
+}
+
+func HardwareCapabilitiesSatisfyPlacementRequirements(req PlacementRequirements, caps HardwarePlacementCapabilities) bool {
+	class := RequiredHardwareClass(req)
+	if class == "" {
+		return true
+	}
+	if class == string(ExecutionConfidentialGPU) && caps.GPUCount == 0 {
+		return false
+	}
+	requireVerified := PlacementRequiresVerifiedHardwareAttestation(req) ||
+		class == string(ExecutionConfidentialCPU) ||
+		class == string(ExecutionConfidentialGPU)
+	if requireVerified {
+		now := caps.Now
+		if now.IsZero() {
+			now = time.Now().UTC()
+		}
+		for _, attestation := range caps.Security.HardwareAttestations {
+			if attestation.Class == class &&
+				attestation.Provider != "" &&
+				attestation.VerifierID != "" &&
+				attestation.KeyID != "" &&
+				attestation.Verified &&
+				(attestation.ExpiresAt.IsZero() || attestation.ExpiresAt.After(now)) {
+				return true
+			}
+		}
+		return false
+	}
+	return contains(caps.Security.HardwareClasses, class) || contains(caps.Security.TEE, class)
 }
 
 func ExecutorCapabilitiesHaveSupportedMatch(req PlacementRequirements, caps PlacementRequirementCapabilities) bool {
