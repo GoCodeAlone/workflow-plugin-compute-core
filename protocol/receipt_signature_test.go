@@ -194,6 +194,40 @@ func TestVerifyEdgeRequestReceiptRequiresDigestAndSignaturePolicy(t *testing.T) 
 	}
 }
 
+func TestEdgeRequestReceiptBindsContentRefByRouteClass(t *testing.T) {
+	content := testEdgeRequestReceipt()
+	content.RouteTarget = "content-route:route-1"
+	content.ServiceLeaseID = ""
+	content.IngressEvidenceID = ""
+	content.IngressEvidenceHash = ""
+	content.ContentRef = digest("content")
+	content.RouterSignature = SoftwareRouterEdgeSignature(content)
+	if _, err := VerifyEdgeRequestReceipt(content, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err != nil {
+		t.Fatalf("VerifyEdgeRequestReceipt(content) error = %v", err)
+	}
+
+	missingContent := content
+	missingContent.ContentRef = ""
+	missingContent.RouterSignature = SoftwareRouterEdgeSignature(missingContent)
+	if _, err := VerifyEdgeRequestReceipt(missingContent, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err == nil || !strings.Contains(err.Error(), "content_ref") {
+		t.Fatalf("VerifyEdgeRequestReceipt() error = %v, want content_ref required", err)
+	}
+
+	service := testEdgeRequestReceipt()
+	service.ContentRef = digest("content")
+	service.RouterSignature = SoftwareRouterEdgeSignature(service)
+	if _, err := VerifyEdgeRequestReceipt(service, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err == nil || !strings.Contains(err.Error(), "content_ref") {
+		t.Fatalf("VerifyEdgeRequestReceipt() error = %v, want service route content_ref rejection", err)
+	}
+
+	padded := content
+	padded.ContentRef = " " + digest("content") + " "
+	padded.RouterSignature = SoftwareRouterEdgeSignature(padded)
+	if _, err := VerifyEdgeRequestReceipt(padded, ReceiptVerificationOptions{AllowSoftwareFallback: true}); err == nil || !strings.Contains(err.Error(), "whitespace") {
+		t.Fatalf("VerifyEdgeRequestReceipt() error = %v, want padded content_ref rejection", err)
+	}
+}
+
 func TestProofReceiptValidateRequiresDigestFields(t *testing.T) {
 	receipt := testProofReceipt()
 	receipt.AgentSignature = SoftwareAgentProofSignature(receipt)
@@ -205,6 +239,23 @@ func TestProofReceiptValidateRequiresDigestFields(t *testing.T) {
 	receipt.ArtifactHash = "sha256:not-hex"
 	if err := receipt.Validate(); err == nil || !strings.Contains(err.Error(), "artifact_hash") {
 		t.Fatalf("Validate() error = %v, want artifact_hash digest rejection", err)
+	}
+}
+
+func TestReceiptPayloadIdentifiersRejectInvalidShapes(t *testing.T) {
+	proof := testProofReceipt()
+	proof.AgentSignature = SoftwareAgentProofSignature(proof)
+	proof.Verifier = VerifierResult{Provider: "signed_receipt", Status: VerificationAccepted}
+	proof.ID = "bad/id"
+	if err := proof.Validate(); err == nil || !strings.Contains(err.Error(), "id") {
+		t.Fatalf("ProofReceipt.Validate() error = %v, want id rejection", err)
+	}
+
+	service := testServiceReceipt()
+	service.AgentSignature = SoftwareAgentServiceSignature(service)
+	service.TraceID = "trace/1"
+	if err := service.Validate(); err == nil || !strings.Contains(err.Error(), "trace_id") {
+		t.Fatalf("ServiceReceipt.Validate() error = %v, want trace_id rejection", err)
 	}
 }
 

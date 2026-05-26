@@ -234,7 +234,7 @@ func VerifyEdgeRequestReceipt(receipt EdgeRequestReceipt, opts ReceiptVerificati
 	if !edgeRequestReceiptSignatureValid(receipt, opts) {
 		return EdgeRequestReceipt{}, errors.New("edge request receipt router_signature is invalid")
 	}
-	receipt.Verifier = receiptVerifierResult(opts, "edge request receipt signature verified; route target and accounting checked")
+	receipt.Verifier = receiptVerifierResult(opts, "edge request receipt signature and shape verified; host must still check route, authz, replay, and accounting")
 	if err := receipt.Validate(); err != nil {
 		return EdgeRequestReceipt{}, err
 	}
@@ -285,6 +285,23 @@ func (r ProofReceipt) Validate() error {
 	require("task_hash", r.TaskHash)
 	require("input_hash", r.InputHash)
 	require("dependency_closure_hash", r.DependencyClosureHash)
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: r.ID},
+		{name: "org_id", value: r.OrgID},
+		{name: "task_id", value: r.TaskID},
+		{name: "worker_id", value: r.WorkerID},
+		{name: "pool_id", value: r.PoolID},
+		{name: "policy_id", value: r.PolicyID},
+	} {
+		if field.value != "" {
+			if err := validateIdentifier(field.name, field.value); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
 	for _, field := range []struct {
 		name  string
 		value string
@@ -356,6 +373,26 @@ func (r ServiceReceipt) Validate() error {
 	require("worker_id", r.WorkerID)
 	require("pool_id", r.PoolID)
 	require("policy_id", r.PolicyID)
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: r.ID},
+		{name: "org_id", value: r.OrgID},
+		{name: "task_id", value: r.TaskID},
+		{name: "service_lease_id", value: r.ServiceLeaseID},
+		{name: "worker_id", value: r.WorkerID},
+		{name: "pool_id", value: r.PoolID},
+		{name: "policy_id", value: r.PolicyID},
+		{name: "request_id", value: r.RequestID},
+		{name: "trace_id", value: r.TraceID},
+	} {
+		if field.value != "" {
+			if err := validateIdentifier(field.name, field.value); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
 	if err := r.Executor.ValidateForProof(); err != nil {
 		errs = append(errs, err)
 	}
@@ -468,6 +505,9 @@ func (r EdgeRequestReceipt) Validate() error {
 		errs = append(errs, errors.New("route_target must be opaque service-route or content-route target"))
 	}
 	if strings.HasPrefix(r.RouteTarget, "service-route:") {
+		if r.ContentRef != "" {
+			errs = append(errs, errors.New("content_ref must be empty for service route receipt"))
+		}
 		require("ingress_evidence_id", r.IngressEvidenceID)
 		require("ingress_evidence_hash", r.IngressEvidenceHash)
 		if r.IngressEvidenceID != "" {
@@ -478,6 +518,9 @@ func (r EdgeRequestReceipt) Validate() error {
 		if r.IngressEvidenceHash != "" && !validSHA256Digest(r.IngressEvidenceHash) {
 			errs = append(errs, errors.New("ingress_evidence_hash must use sha256 digest"))
 		}
+	}
+	if strings.HasPrefix(r.RouteTarget, "content-route:") {
+		require("content_ref", r.ContentRef)
 	}
 	if r.ContentRef != "" {
 		if err := validateContentRef(r.ContentRef); err != nil {
@@ -545,9 +588,11 @@ func validStoredProofStatus(status VerificationStatus) bool {
 }
 
 func validateContentRef(ref string) error {
-	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return errors.New("ref is required")
+	}
+	if strings.TrimSpace(ref) != ref {
+		return errors.New("ref must not contain leading or trailing whitespace")
 	}
 	if strings.ContainsAny(ref, " \t\r\n?&#") || strings.Contains(ref, "://") && !strings.HasPrefix(ref, "artifact://") {
 		return errors.New("ref must be immutable digest/artifact ref without URL query or fragment")
