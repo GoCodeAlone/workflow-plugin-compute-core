@@ -92,6 +92,88 @@ func TestRuntimeExecutionRequestRejectsMalformedInvocation(t *testing.T) {
 	}
 }
 
+func TestServiceIngressEvidenceValidation(t *testing.T) {
+	evidence := validServiceIngressEvidence()
+	if err := evidence.Validate(); err != nil {
+		t.Fatalf("valid ingress evidence rejected: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		mut  func(*protocol.ServiceIngressEvidence)
+		want string
+	}{
+		{"missing auth decision", func(e *protocol.ServiceIngressEvidence) { e.AuthDecisionHash = "" }, "auth_decision_hash"},
+		{"missing health response", func(e *protocol.ServiceIngressEvidence) { e.LastHealthResponseHash = "" }, "last_health_response_hash"},
+		{"missing helper target", func(e *protocol.ServiceIngressEvidence) { e.HelperContainerNetNSTarget = "" }, "helper_container_netns_target"},
+		{"unsafe helper host", func(e *protocol.ServiceIngressEvidence) { e.HelperHost = "10.0.0.5" }, "helper_host"},
+		{"queryful request path", func(e *protocol.ServiceIngressEvidence) { e.RequestPath = "/compile?token=secret" }, "query"},
+		{"unsupported method", func(e *protocol.ServiceIngressEvidence) { e.RequestMethod = "PUT" }, "request_method"},
+		{"failed without class", func(e *protocol.ServiceIngressEvidence) {
+			e.TerminalStatus = protocol.ServiceIngressTerminalFailed
+			e.ResponseStatus = 0
+			e.ResponseHash = ""
+			e.FailureClass = ""
+		}, "failure_class"},
+		{"secret request header", func(e *protocol.ServiceIngressEvidence) { e.RequestHeaderNames = []string{"authorization"} }, "header"},
+		{"secret response header", func(e *protocol.ServiceIngressEvidence) { e.ResponseHeaderNames = []string{"cookie"} }, "header"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := evidence
+			got.RequestHeaderNames = slices.Clone(evidence.RequestHeaderNames)
+			got.ResponseHeaderNames = slices.Clone(evidence.ResponseHeaderNames)
+			tc.mut(&got)
+			if err := got.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func validServiceIngressEvidence() protocol.ServiceIngressEvidence {
+	return protocol.ServiceIngressEvidence{
+		ID:                         "ing-evidence-1",
+		OrgID:                      "org-1",
+		PoolID:                     "pool-1",
+		ProductID:                  "edge-product",
+		Hostname:                   "edge.example.invalid",
+		RouteTarget:                "service-route:abc123",
+		ServiceLeaseID:             "svc-1",
+		TaskID:                     "task-1",
+		WorkerID:                   "worker-1",
+		LeaseLeasedAt:              time.Unix(100, 0).UTC(),
+		LeaseRenewBy:               time.Unix(200, 0).UTC(),
+		SelectedAt:                 time.Unix(101, 0).UTC(),
+		LastHealthAt:               time.Unix(102, 0).UTC(),
+		HealthValidUntil:           time.Unix(132, 0).UTC(),
+		LastHealthResponseHash:     "sha256:" + strings.Repeat("b", 64),
+		LastHealthSLOEvidenceHash:  "sha256:" + strings.Repeat("c", 64),
+		AuthDecisionHash:           "sha256:" + strings.Repeat("d", 64),
+		IdempotencyKey:             "idem-1",
+		RequestMethod:              "POST",
+		RequestPath:                "/compile",
+		RequestBodyHash:            "sha256:" + strings.Repeat("e", 64),
+		RequestHeaderNames:         []string{"content-type"},
+		HelperImage:                "ingress-helper@sha256:" + strings.Repeat("f", 64),
+		HelperScheme:               "http",
+		HelperHost:                 "127.0.0.1",
+		HelperPort:                 8080,
+		HelperPortName:             "http",
+		HelperTimeoutMS:            1000,
+		HelperContainerNetNSTarget: "container:svc-container",
+		HelperOutputHash:           "sha256:" + strings.Repeat("1", 64),
+		HelperErrorHash:            "sha256:" + strings.Repeat("2", 64),
+		ResponseStatus:             200,
+		ResponseHeaderNames:        []string{"content-type"},
+		ResponseHash:               "sha256:" + strings.Repeat("3", 64),
+		ResponseBytes:              42,
+		TerminalStatus:             protocol.ServiceIngressTerminalCompleted,
+		StartedAt:                  time.Unix(103, 0).UTC(),
+		FinishedAt:                 time.Unix(104, 0).UTC(),
+	}
+}
+
 func TestRuntimeExecutionResultValidatesTimingAndPreview(t *testing.T) {
 	result := protocol.RuntimeExecutionResult{
 		StartedAt:     time.Unix(10, 0).UTC(),
