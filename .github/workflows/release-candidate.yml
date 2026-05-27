@@ -2,6 +2,10 @@ name: Release Candidate
 on:
   workflow_dispatch:
     inputs:
+      candidate_ref:
+        description: Branch, tag, or commit SHA to validate
+        required: true
+        type: string
       wfctl_version:
         description: wfctl version used for contract validation
         required: true
@@ -18,6 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_ref }}
           fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
