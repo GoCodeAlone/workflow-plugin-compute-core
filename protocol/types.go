@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,12 +9,21 @@ import (
 	"fmt"
 	"mime"
 	"net/netip"
+	"net/url"
 	"path"
 	"strings"
 	"time"
+
+	pb "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 const Version = "compute.v1alpha1"
+
+const NetworkAuditProtocolVersion = Version
 
 type NetworkOperatingMode string
 
@@ -817,6 +827,698 @@ type ResourceUsage struct {
 	WorkspaceBytes int64  `json:"workspace_bytes,omitempty"`
 	OutputBytes    int64  `json:"output_bytes,omitempty"`
 	LimitHit       string `json:"limit_hit,omitempty"`
+}
+
+const NetworkAuditMaxLabels = 32
+
+const NetworkAuditRefKeyEpoch = "network-audit-ref-v1"
+
+type NetworkAuditDestinationKind string
+
+const (
+	NetworkAuditDestinationEndpoint  NetworkAuditDestinationKind = "endpoint"
+	NetworkAuditDestinationSHA256    NetworkAuditDestinationKind = "sha256"
+	NetworkAuditDestinationArtifact  NetworkAuditDestinationKind = "artifact"
+	NetworkAuditDestinationLifecycle NetworkAuditDestinationKind = "network-lifecycle"
+)
+
+type NetworkAuditValidationCode string
+
+const (
+	NetworkAuditValidationProtocolVersionInvalid NetworkAuditValidationCode = "protocol_version_invalid"
+	NetworkAuditValidationRecordIDRequired       NetworkAuditValidationCode = "record_id_required"
+	NetworkAuditValidationDestinationRequired    NetworkAuditValidationCode = "destination_required"
+	NetworkAuditValidationDestinationInvalid     NetworkAuditValidationCode = "destination_invalid"
+	NetworkAuditValidationResourceUsageInvalid   NetworkAuditValidationCode = "resource_usage_invalid"
+	NetworkAuditValidationLabelInvalid           NetworkAuditValidationCode = "label_invalid"
+	NetworkAuditValidationLabelCountExceeded     NetworkAuditValidationCode = "label_count_exceeded"
+	NetworkAuditValidationTimeRangeInvalid       NetworkAuditValidationCode = "time_range_invalid"
+	NetworkAuditValidationProviderInvalid        NetworkAuditValidationCode = "provider_invalid"
+)
+
+type NetworkAuditValidationIssue struct {
+	Code    NetworkAuditValidationCode `json:"code"`
+	Field   string                     `json:"field"`
+	Message string                     `json:"message"`
+}
+
+type NetworkAuditValidationError struct {
+	Issues []NetworkAuditValidationIssue
+}
+
+func (e NetworkAuditValidationError) Error() string {
+	if len(e.Issues) == 0 {
+		return "network audit validation failed"
+	}
+	return fmt.Sprintf("network audit validation failed with %d issue(s)", len(e.Issues))
+}
+
+type NetworkAuditDestination struct {
+	Kind  NetworkAuditDestinationKind `json:"kind"`
+	Value string                      `json:"value"`
+}
+
+type NetworkAuditProviderEvidence struct {
+	ProviderID       string `json:"provider_id,omitempty"`
+	PluginName       string `json:"plugin_name,omitempty"`
+	PluginVersion    string `json:"plugin_version,omitempty"`
+	ContractID       string `json:"contract_id,omitempty"`
+	ContractVersion  string `json:"contract_version,omitempty"`
+	DescriptorDigest string `json:"descriptor_digest,omitempty"`
+}
+
+type NetworkAuditRefStability string
+
+const (
+	NetworkAuditRefStable    NetworkAuditRefStability = "stable"
+	NetworkAuditRefEphemeral NetworkAuditRefStability = "ephemeral"
+)
+
+type NetworkAuditRefOptions struct {
+	Stability NetworkAuditRefStability
+	Timestamp time.Time
+}
+
+type NetworkAuditRefProjection struct {
+	Ref       string                   `json:"ref"`
+	Epoch     string                   `json:"epoch"`
+	Stability NetworkAuditRefStability `json:"stability"`
+	Timestamp string                   `json:"timestamp"`
+}
+
+type NetworkAuditRefProjector struct {
+	key []byte
+}
+
+type NetworkAuditRecord struct {
+	ProtocolVersion string                       `json:"protocol_version"`
+	RecordID        string                       `json:"record_id"`
+	TaskID          string                       `json:"task_id,omitempty"`
+	LeaseID         string                       `json:"lease_id,omitempty"`
+	WorkerID        string                       `json:"worker_id,omitempty"`
+	Provider        NetworkAuditProviderEvidence `json:"provider,omitempty"`
+	Destination     NetworkAuditDestination      `json:"destination"`
+	ResourceUsage   ResourceUsage                `json:"resource_usage,omitempty"`
+	Labels          map[string]string            `json:"labels,omitempty"`
+	StartedAt       time.Time                    `json:"started_at,omitempty"`
+	FinishedAt      time.Time                    `json:"finished_at,omitempty"`
+	ObservedAt      time.Time                    `json:"observed_at,omitempty"`
+}
+
+func ProjectNetworkAuditDestination(raw string) (NetworkAuditDestination, []NetworkAuditValidationIssue) {
+	value := strings.TrimSpace(raw)
+	var kind NetworkAuditDestinationKind
+	switch {
+	case strings.HasPrefix(value, "sha256:"):
+		kind = NetworkAuditDestinationSHA256
+	case strings.HasPrefix(value, "artifact://"):
+		kind = NetworkAuditDestinationArtifact
+	case strings.HasPrefix(value, "network-lifecycle://"):
+		kind = NetworkAuditDestinationLifecycle
+	default:
+		kind = NetworkAuditDestinationEndpoint
+	}
+	destination := NetworkAuditDestination{Kind: kind, Value: value}
+	return destination, destination.validateNetworkAudit()
+}
+
+func ProjectNetworkAuditLifecycle(leaseID, event string) (NetworkAuditDestination, []NetworkAuditValidationIssue) {
+	destination, err := NewNetworkAuditLifecycleDestination(leaseID, event)
+	if err != nil {
+		return NetworkAuditDestination{}, []NetworkAuditValidationIssue{
+			networkAuditIssue(NetworkAuditValidationDestinationInvalid, "destination", "lifecycle destination is invalid"),
+		}
+	}
+	return destination, nil
+}
+
+func NewNetworkAuditLifecycleDestination(leaseID, event string) (NetworkAuditDestination, error) {
+	if err := validateIdentifier("lease_id", leaseID); err != nil {
+		return NetworkAuditDestination{}, err
+	}
+	if err := validateIdentifier("event", event); err != nil {
+		return NetworkAuditDestination{}, err
+	}
+	destination := NetworkAuditDestination{
+		Kind:  NetworkAuditDestinationLifecycle,
+		Value: "network-lifecycle://" + leaseID + "/" + event,
+	}
+	if issues := destination.validateNetworkAudit(); len(issues) != 0 {
+		return NetworkAuditDestination{}, NetworkAuditValidationError{Issues: issues}
+	}
+	return destination, nil
+}
+
+func ProjectNetworkAuditLabels(labels map[string]string) (map[string]string, []NetworkAuditValidationIssue) {
+	projected := copyStringMap(labels)
+	return projected, validateNetworkAuditLabels(projected)
+}
+
+func ProjectNetworkAuditProvider(providerID, pluginName, pluginVersion, contractID, contractVersion, descriptorDigest string) (NetworkAuditProviderEvidence, []NetworkAuditValidationIssue) {
+	provider := NetworkAuditProviderEvidence{
+		ProviderID:       strings.TrimSpace(providerID),
+		PluginName:       strings.TrimSpace(pluginName),
+		PluginVersion:    strings.TrimSpace(pluginVersion),
+		ContractID:       strings.TrimSpace(contractID),
+		ContractVersion:  strings.TrimSpace(contractVersion),
+		DescriptorDigest: strings.TrimSpace(descriptorDigest),
+	}
+	return provider, provider.validateNetworkAudit()
+}
+
+func ProjectNetworkAuditID(components ...string) (string, error) {
+	if len(components) == 0 {
+		return "", errors.New("at least one network audit id component is required")
+	}
+	hash := sha256.New()
+	for _, component := range components {
+		if strings.TrimSpace(component) == "" || strings.ContainsAny(component, "\x00\r\n\t") {
+			return "", errors.New("network audit id component is invalid")
+		}
+		fmt.Fprintf(hash, "%d:", len(component))
+		_, _ = hash.Write([]byte(component))
+		_, _ = hash.Write([]byte{0})
+	}
+	return "network-audit-sha256-" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func NewNetworkAuditRefProjector(key []byte) (NetworkAuditRefProjector, error) {
+	if len(key) < 32 {
+		return NetworkAuditRefProjector{}, errors.New("network audit ref key must be at least 32 bytes")
+	}
+	copied := make([]byte, len(key))
+	copy(copied, key)
+	return NetworkAuditRefProjector{key: copied}, nil
+}
+
+func (p NetworkAuditRefProjector) Project(record NetworkAuditRecord, options NetworkAuditRefOptions) (NetworkAuditRefProjection, error) {
+	if len(p.key) < 32 {
+		return NetworkAuditRefProjection{}, errors.New("network audit ref projector key is invalid")
+	}
+	if err := record.Validate(); err != nil {
+		return NetworkAuditRefProjection{}, err
+	}
+	stability := options.Stability
+	if stability == "" {
+		stability = NetworkAuditRefStable
+	}
+	switch stability {
+	case NetworkAuditRefStable, NetworkAuditRefEphemeral:
+	default:
+		return NetworkAuditRefProjection{}, errors.New("network audit ref stability is invalid")
+	}
+	timestamp := options.Timestamp
+	if timestamp.IsZero() {
+		timestamp = record.StartedAt
+	}
+	if timestamp.IsZero() {
+		timestamp = record.ObservedAt
+	}
+	if timestamp.IsZero() {
+		timestamp = record.FinishedAt
+	}
+	normalizedTimestamp := timestamp.UTC().Format(time.RFC3339Nano)
+	normalizedRecord := record
+	normalizedRecord.StartedAt = normalizedRecord.StartedAt.UTC()
+	normalizedRecord.FinishedAt = normalizedRecord.FinishedAt.UTC()
+	normalizedRecord.ObservedAt = normalizedRecord.ObservedAt.UTC()
+	recordDigest := CanonicalHash(normalizedRecord)
+	input := strings.Join([]string{
+		NetworkAuditRefKeyEpoch,
+		string(stability),
+		recordDigest,
+		normalizedTimestamp,
+		"",
+	}, "\n")
+	mac := hmac.New(sha256.New, p.key)
+	_, _ = mac.Write([]byte(input))
+	ref := NetworkAuditRefKeyEpoch + ":" + string(stability) + ":" + hex.EncodeToString(mac.Sum(nil))
+	return NetworkAuditRefProjection{
+		Ref:       ref,
+		Epoch:     NetworkAuditRefKeyEpoch,
+		Stability: stability,
+		Timestamp: normalizedTimestamp,
+	}, nil
+}
+
+func ClassifyLegacyNetworkAuditRecord(record map[string]any) []NetworkAuditValidationIssue {
+	var findings []NetworkAuditValidationIssue
+	if rawDestination, ok := record["destination"].(string); ok {
+		_, issues := ProjectNetworkAuditDestination(rawDestination)
+		findings = append(findings, issues...)
+	}
+	if rawLabels, ok := record["labels"].(map[string]any); ok {
+		labels := make(map[string]string, len(rawLabels))
+		for key, value := range rawLabels {
+			stringValue, ok := value.(string)
+			if !ok {
+				findings = append(findings, networkAuditIssue(NetworkAuditValidationLabelInvalid, "labels", "label value is invalid"))
+				continue
+			}
+			labels[key] = stringValue
+		}
+		_, issues := ProjectNetworkAuditLabels(labels)
+		findings = append(findings, issues...)
+	}
+	if rawUsage, ok := record["resource_usage"].(map[string]any); ok {
+		usage := ResourceUsage{
+			CPUMillis:      legacyInt64(rawUsage["cpu_millis"]),
+			GPUMillis:      legacyInt64(rawUsage["gpu_millis"]),
+			MaxMemoryBytes: legacyInt64(rawUsage["max_memory_bytes"]),
+			NetworkRxBytes: legacyInt64(rawUsage["network_rx_bytes"]),
+			NetworkTxBytes: legacyInt64(rawUsage["network_tx_bytes"]),
+			WorkspaceBytes: legacyInt64(rawUsage["workspace_bytes"]),
+			OutputBytes:    legacyInt64(rawUsage["output_bytes"]),
+		}
+		if err := validateNetworkAuditResourceUsage(usage); err != nil {
+			findings = append(findings, networkAuditIssue(NetworkAuditValidationResourceUsageInvalid, "resource_usage", "resource usage contains invalid counters"))
+		}
+	}
+	return findings
+}
+
+func legacyInt64(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int8:
+		return int64(typed)
+	case int16:
+		return int64(typed)
+	case int32:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case json.Number:
+		converted, _ := typed.Int64()
+		return converted
+	default:
+		return 0
+	}
+}
+
+func (r NetworkAuditRecord) Validate() error {
+	issues := r.ValidateNetworkAudit()
+	if len(issues) == 0 {
+		return nil
+	}
+	return NetworkAuditValidationError{Issues: issues}
+}
+
+func (r NetworkAuditRecord) ValidateNetworkAudit() []NetworkAuditValidationIssue {
+	var issues []NetworkAuditValidationIssue
+	if r.ProtocolVersion != NetworkAuditProtocolVersion {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationProtocolVersionInvalid, "protocol_version", "protocol version is not supported"))
+	}
+	if err := validateIdentifier("record_id", r.RecordID); err != nil {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationRecordIDRequired, "record_id", "record id is required"))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"task_id", r.TaskID},
+		{"lease_id", r.LeaseID},
+		{"worker_id", r.WorkerID},
+	} {
+		if field.value != "" {
+			if err := validateIdentifier(field.name, field.value); err != nil {
+				issues = append(issues, networkAuditIssue(NetworkAuditValidationRecordIDRequired, field.name, "identifier is invalid"))
+			}
+		}
+	}
+	issues = append(issues, r.Provider.validateNetworkAudit()...)
+	issues = append(issues, r.Destination.validateNetworkAudit()...)
+	if err := validateNetworkAuditResourceUsage(r.ResourceUsage); err != nil {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationResourceUsageInvalid, "resource_usage", "resource usage contains invalid counters"))
+	}
+	issues = append(issues, validateNetworkAuditLabels(r.Labels)...)
+	if !r.StartedAt.IsZero() && !r.FinishedAt.IsZero() && r.FinishedAt.Before(r.StartedAt) {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationTimeRangeInvalid, "finished_at", "finish time must not precede start time"))
+	}
+	if !r.FinishedAt.IsZero() && !r.ObservedAt.IsZero() && r.ObservedAt.Before(r.FinishedAt) {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationTimeRangeInvalid, "observed_at", "observed time must not precede finish time"))
+	}
+	return issues
+}
+
+func (p NetworkAuditProviderEvidence) validateNetworkAudit() []NetworkAuditValidationIssue {
+	var issues []NetworkAuditValidationIssue
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"provider_id", p.ProviderID},
+		{"plugin_name", p.PluginName},
+		{"plugin_version", p.PluginVersion},
+		{"contract_id", p.ContractID},
+		{"contract_version", p.ContractVersion},
+	} {
+		if field.value != "" {
+			if err := validateIdentifier(field.name, field.value); err != nil {
+				issues = append(issues, networkAuditIssue(NetworkAuditValidationProviderInvalid, field.name, "provider evidence identifier is invalid"))
+			}
+		}
+	}
+	if p.DescriptorDigest != "" && !validSHA256Digest(p.DescriptorDigest) {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationProviderInvalid, "descriptor_digest", "descriptor digest is invalid"))
+	}
+	return issues
+}
+
+func (d NetworkAuditDestination) validateNetworkAudit() []NetworkAuditValidationIssue {
+	if d.Kind == "" && strings.TrimSpace(d.Value) == "" {
+		return []NetworkAuditValidationIssue{
+			networkAuditIssue(NetworkAuditValidationDestinationRequired, "destination", "destination is required"),
+		}
+	}
+	if !validNetworkAuditDestination(d) {
+		return []NetworkAuditValidationIssue{
+			networkAuditIssue(NetworkAuditValidationDestinationInvalid, "destination", "destination is invalid"),
+		}
+	}
+	return nil
+}
+
+func validNetworkAuditDestination(d NetworkAuditDestination) bool {
+	value := strings.TrimSpace(d.Value)
+	if value == "" || value != d.Value || strings.ContainsAny(value, " \t\r\n\x00") {
+		return false
+	}
+	switch d.Kind {
+	case NetworkAuditDestinationEndpoint:
+		return validNetworkAuditEndpoint(value)
+	case NetworkAuditDestinationSHA256:
+		return validSHA256Ref(value)
+	case NetworkAuditDestinationArtifact:
+		return validateScopedRef("destination", value, "artifact://") == nil && !strings.ContainsAny(value, "\t\r\n\x00")
+	case NetworkAuditDestinationLifecycle:
+		return validNetworkLifecycleRef(value)
+	default:
+		return false
+	}
+}
+
+func validNetworkAuditEndpoint(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	switch parsed.Scheme {
+	case "http", "https", "tcp", "udp":
+	default:
+		return false
+	}
+	return parsed.Host != "" &&
+		parsed.User == nil &&
+		parsed.RawQuery == "" &&
+		parsed.Fragment == "" &&
+		!strings.Contains(parsed.Path, "..")
+}
+
+func validNetworkLifecycleRef(value string) bool {
+	if !strings.HasPrefix(value, "network-lifecycle://") {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "network-lifecycle" &&
+		parsed.Host != "" &&
+		parsed.User == nil &&
+		parsed.RawQuery == "" &&
+		parsed.Fragment == "" &&
+		parsed.Path != "" &&
+		!strings.Contains(parsed.Path, "..") &&
+		validateIdentifier("lease_id", parsed.Host) == nil &&
+		validateIdentifier("event", strings.TrimPrefix(parsed.Path, "/")) == nil
+}
+
+func validateNetworkAuditResourceUsage(usage ResourceUsage) error {
+	var errs []error
+	for _, field := range []struct {
+		name  string
+		value int64
+	}{
+		{"cpu_millis", usage.CPUMillis},
+		{"gpu_millis", usage.GPUMillis},
+		{"max_memory_bytes", usage.MaxMemoryBytes},
+		{"network_rx_bytes", usage.NetworkRxBytes},
+		{"network_tx_bytes", usage.NetworkTxBytes},
+		{"workspace_bytes", usage.WorkspaceBytes},
+		{"output_bytes", usage.OutputBytes},
+	} {
+		if field.value < 0 {
+			errs = append(errs, fmt.Errorf("%s cannot be negative", field.name))
+		}
+	}
+	if usage.LimitHit != "" && (strings.TrimSpace(usage.LimitHit) != usage.LimitHit || strings.ContainsAny(usage.LimitHit, " \t\r\n/:?&#\x00")) {
+		errs = append(errs, errors.New("limit_hit is invalid"))
+	}
+	return errors.Join(errs...)
+}
+
+func validateNetworkAuditLabels(labels map[string]string) []NetworkAuditValidationIssue {
+	var issues []NetworkAuditValidationIssue
+	if len(labels) > NetworkAuditMaxLabels {
+		issues = append(issues, networkAuditIssue(NetworkAuditValidationLabelCountExceeded, "labels", "label count exceeds limit"))
+	}
+	for key, value := range labels {
+		if err := validateIdentifier("label", key); err != nil {
+			issues = append(issues, networkAuditIssue(NetworkAuditValidationLabelInvalid, "labels", "label key is invalid"))
+		}
+		if value == "" || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\t\r\n\x00") {
+			issues = append(issues, networkAuditIssue(NetworkAuditValidationLabelInvalid, "labels", "label value is invalid"))
+		}
+	}
+	return issues
+}
+
+func networkAuditIssue(code NetworkAuditValidationCode, field, message string) NetworkAuditValidationIssue {
+	return NetworkAuditValidationIssue{
+		Code:    code,
+		Field:   field,
+		Message: message,
+	}
+}
+
+func (r NetworkAuditRecord) ToProto() *pb.NetworkAuditRecord {
+	return &pb.NetworkAuditRecord{
+		ProtocolVersion:    r.ProtocolVersion,
+		RecordId:           r.RecordID,
+		TaskId:             r.TaskID,
+		LeaseId:            r.LeaseID,
+		WorkerId:           r.WorkerID,
+		Provider:           r.Provider.toProto(),
+		Destination:        r.Destination.toProto(),
+		ResourceUsage:      networkAuditResourceUsageToProto(r.ResourceUsage),
+		Labels:             copyStringMap(r.Labels),
+		StartedAtUnixNano:  unixNanoOrZero(r.StartedAt),
+		FinishedAtUnixNano: unixNanoOrZero(r.FinishedAt),
+		ObservedAtUnixNano: unixNanoOrZero(r.ObservedAt),
+	}
+}
+
+func NetworkAuditRecordFromProto(message *pb.NetworkAuditRecord) (NetworkAuditRecord, error) {
+	if message == nil {
+		return NetworkAuditRecord{}, NetworkAuditValidationError{Issues: []NetworkAuditValidationIssue{
+			networkAuditIssue(NetworkAuditValidationRecordIDRequired, "record", "record is required"),
+		}}
+	}
+	if message.GetStartedAtUnixNano() < 0 || message.GetFinishedAtUnixNano() < 0 || message.GetObservedAtUnixNano() < 0 {
+		return NetworkAuditRecord{}, NetworkAuditValidationError{Issues: []NetworkAuditValidationIssue{
+			networkAuditIssue(NetworkAuditValidationTimeRangeInvalid, "timestamp", "timestamp must not be negative"),
+		}}
+	}
+	record := NetworkAuditRecord{
+		ProtocolVersion: message.GetProtocolVersion(),
+		RecordID:        message.GetRecordId(),
+		TaskID:          message.GetTaskId(),
+		LeaseID:         message.GetLeaseId(),
+		WorkerID:        message.GetWorkerId(),
+		Provider:        networkAuditProviderFromProto(message.GetProvider()),
+		Destination:     networkAuditDestinationFromProto(message.GetDestination()),
+		ResourceUsage:   networkAuditResourceUsageFromProto(message.GetResourceUsage()),
+		Labels:          copyStringMap(message.GetLabels()),
+		StartedAt:       timeFromUnixNano(message.GetStartedAtUnixNano()),
+		FinishedAt:      timeFromUnixNano(message.GetFinishedAtUnixNano()),
+		ObservedAt:      timeFromUnixNano(message.GetObservedAtUnixNano()),
+	}
+	if err := record.Validate(); err != nil {
+		return NetworkAuditRecord{}, err
+	}
+	return record, nil
+}
+
+func UnmarshalNetworkAuditRecordProtoStrict(data []byte) (*pb.NetworkAuditRecord, error) {
+	var message pb.NetworkAuditRecord
+	if err := (proto.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(data, &message); err != nil {
+		return nil, err
+	}
+	if err := rejectUnknownProtoFields(&message); err != nil {
+		return nil, err
+	}
+	return &message, nil
+}
+
+func rejectUnknownProtoFields(message proto.Message) error {
+	if message == nil {
+		return nil
+	}
+	reflected := message.ProtoReflect()
+	if len(reflected.GetUnknown()) != 0 {
+		return fmt.Errorf("proto message %s contains unknown fields", reflected.Descriptor().FullName())
+	}
+	var err error
+	reflected.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		if field.IsMap() {
+			if field.MapValue().Message() == nil {
+				return true
+			}
+			value.Map().Range(func(_ protoreflect.MapKey, mapValue protoreflect.Value) bool {
+				if nestedErr := rejectUnknownProtoFields(mapValue.Message().Interface()); nestedErr != nil {
+					err = nestedErr
+					return false
+				}
+				return true
+			})
+			return err == nil
+		}
+		if field.IsList() && field.Message() != nil {
+			list := value.List()
+			for i := range list.Len() {
+				if nestedErr := rejectUnknownProtoFields(list.Get(i).Message().Interface()); nestedErr != nil {
+					err = nestedErr
+					return false
+				}
+			}
+			return true
+		}
+		if field.Message() != nil {
+			if nestedErr := rejectUnknownProtoFields(value.Message().Interface()); nestedErr != nil {
+				err = nestedErr
+				return false
+			}
+		}
+		return true
+	})
+	return err
+}
+
+func (p NetworkAuditProviderEvidence) toProto() *pb.NetworkAuditProviderEvidence {
+	return &pb.NetworkAuditProviderEvidence{
+		ProviderId:       p.ProviderID,
+		PluginName:       p.PluginName,
+		PluginVersion:    p.PluginVersion,
+		ContractId:       p.ContractID,
+		ContractVersion:  p.ContractVersion,
+		DescriptorDigest: p.DescriptorDigest,
+	}
+}
+
+func networkAuditProviderFromProto(message *pb.NetworkAuditProviderEvidence) NetworkAuditProviderEvidence {
+	if message == nil {
+		return NetworkAuditProviderEvidence{}
+	}
+	return NetworkAuditProviderEvidence{
+		ProviderID:       message.GetProviderId(),
+		PluginName:       message.GetPluginName(),
+		PluginVersion:    message.GetPluginVersion(),
+		ContractID:       message.GetContractId(),
+		ContractVersion:  message.GetContractVersion(),
+		DescriptorDigest: message.GetDescriptorDigest(),
+	}
+}
+
+func (d NetworkAuditDestination) toProto() *pb.NetworkAuditDestination {
+	return &pb.NetworkAuditDestination{
+		Kind:  string(d.Kind),
+		Value: d.Value,
+	}
+}
+
+func networkAuditDestinationFromProto(message *pb.NetworkAuditDestination) NetworkAuditDestination {
+	if message == nil {
+		return NetworkAuditDestination{}
+	}
+	return NetworkAuditDestination{
+		Kind:  NetworkAuditDestinationKind(message.GetKind()),
+		Value: message.GetValue(),
+	}
+}
+
+func networkAuditResourceUsageToProto(usage ResourceUsage) *pb.NetworkAuditResourceUsage {
+	return &pb.NetworkAuditResourceUsage{
+		CpuMillis:      usage.CPUMillis,
+		GpuMillis:      usage.GPUMillis,
+		MaxMemoryBytes: usage.MaxMemoryBytes,
+		NetworkRxBytes: usage.NetworkRxBytes,
+		NetworkTxBytes: usage.NetworkTxBytes,
+		WorkspaceBytes: usage.WorkspaceBytes,
+		OutputBytes:    usage.OutputBytes,
+		LimitHit:       usage.LimitHit,
+	}
+}
+
+func networkAuditResourceUsageFromProto(message *pb.NetworkAuditResourceUsage) ResourceUsage {
+	if message == nil {
+		return ResourceUsage{}
+	}
+	return ResourceUsage{
+		CPUMillis:      message.GetCpuMillis(),
+		GPUMillis:      message.GetGpuMillis(),
+		MaxMemoryBytes: message.GetMaxMemoryBytes(),
+		NetworkRxBytes: message.GetNetworkRxBytes(),
+		NetworkTxBytes: message.GetNetworkTxBytes(),
+		WorkspaceBytes: message.GetWorkspaceBytes(),
+		OutputBytes:    message.GetOutputBytes(),
+		LimitHit:       message.GetLimitHit(),
+	}
+}
+
+func unixNanoOrZero(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().UnixNano()
+}
+
+func timeFromUnixNano(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, value).UTC()
+}
+
+func copyStringMap(input map[string]string) map[string]string {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]string, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
+}
+
+func NetworkAuditDescriptorSet() *descriptorpb.FileDescriptorSet {
+	return &descriptorpb.FileDescriptorSet{
+		File: []*descriptorpb.FileDescriptorProto{
+			protodesc.ToFileDescriptorProto(pb.File_workflow_plugin_compute_core_protocol_v1_network_audit_proto),
+		},
+	}
+}
+
+func NetworkAuditDescriptorDigest() string {
+	data, err := (proto.MarshalOptions{Deterministic: true}).Marshal(NetworkAuditDescriptorSet())
+	if err != nil {
+		return CanonicalHash(pb.File_workflow_plugin_compute_core_protocol_v1_network_audit_proto.FullName())
+	}
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 type ResourceLimits struct {

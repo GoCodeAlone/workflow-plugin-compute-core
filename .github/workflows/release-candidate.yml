@@ -1,0 +1,46 @@
+name: Release Candidate
+on:
+  workflow_dispatch:
+    inputs:
+      wfctl_version:
+        description: wfctl version used for contract validation
+        required: true
+        type: string
+      candidate_tag:
+        description: Candidate semver tag used for snapshot validation
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956
+        with:
+          version: ${{ inputs.wfctl_version }}
+      - name: Check proto generation
+        run: ./scripts/check-proto.sh
+      - name: Check plugin contract
+        run: ./scripts/check-workflow-engine-load.sh --mode public --wfctl-version "${{ inputs.wfctl_version }}"
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./... -race -count=1
+      - name: Vet
+        run: go vet ./...
+      - name: GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ inputs.candidate_tag }}
