@@ -1,4 +1,22 @@
 {
-    "version": "1",
-    "contracts": []
+  "version": "1",
+  "descriptorSetRef": "descriptors/network_audit.pb",
+  "contracts": [
+    {
+      "kind": "message",
+      "contractType": "compute.network_audit_evidence.v1",
+      "mode": "strict",
+      "protoPackage": "workflow_plugin_compute_core.protocol.v1",
+      "messageNames": [
+        "workflow_plugin_compute_core.protocol.v1.NetworkAuditRecord",
+        "workflow_plugin_compute_core.protocol.v1.NetworkAuditDestination",
+        "workflow_plugin_compute_core.protocol.v1.NetworkAuditProviderEvidence",
+        "workflow_plugin_compute_core.protocol.v1.NetworkAuditResourceUsage",
+        "workflow_plugin_compute_core.protocol.v1.NetworkAuditValidationIssue"
+      ],
+      "goImportPath": "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb",
+      "schemaDigest": "sha256:cd5005817dab1b5cbfe18c7fe3f640680ddf2109c59278d32ecc78fd55bde9d7",
+      "protocolVersion": "compute.v1alpha1"
+    }
+  ]
 }

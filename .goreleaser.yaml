@@ -26,6 +26,10 @@ archives:
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     files:
       - plugin.json
+      - plugin.contracts.json
+      - descriptors/network_audit.pb
+      - proto/workflow_plugin_compute_core/protocol/v1/network_audit.proto
+      - proto/workflow_plugin_compute_core/protocol/v1/network_audit.fields.json
       - LICENSE
 
 checksum:

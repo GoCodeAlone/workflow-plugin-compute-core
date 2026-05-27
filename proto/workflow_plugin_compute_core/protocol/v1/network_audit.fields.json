@@ -1,0 +1,46 @@
+{
+  "package": "workflow_plugin_compute_core.protocol.v1",
+  "messages": {
+    "NetworkAuditRecord": {
+      "1": "protocol_version",
+      "2": "record_id",
+      "3": "task_id",
+      "4": "lease_id",
+      "5": "worker_id",
+      "6": "provider",
+      "7": "destination",
+      "8": "resource_usage",
+      "9": "labels",
+      "10": "started_at_unix_nano",
+      "11": "finished_at_unix_nano",
+      "12": "observed_at_unix_nano"
+    },
+    "NetworkAuditProviderEvidence": {
+      "1": "provider_id",
+      "2": "plugin_name",
+      "3": "plugin_version",
+      "4": "contract_id",
+      "5": "contract_version",
+      "6": "descriptor_digest"
+    },
+    "NetworkAuditDestination": {
+      "1": "kind",
+      "2": "value"
+    },
+    "NetworkAuditResourceUsage": {
+      "1": "cpu_millis",
+      "2": "gpu_millis",
+      "3": "max_memory_bytes",
+      "4": "network_rx_bytes",
+      "5": "network_tx_bytes",
+      "6": "workspace_bytes",
+      "7": "output_bytes",
+      "8": "limit_hit"
+    },
+    "NetworkAuditValidationIssue": {
+      "1": "code",
+      "2": "field",
+      "3": "message"
+    }
+  }
+}

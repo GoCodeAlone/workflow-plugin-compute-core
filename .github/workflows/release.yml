@@ -19,7 +19,7 @@ jobs:
         with:
           version: v0.64.7
       - name: Validate plugin contract for publish (pre-build)
-        run: wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" .
+        run: wfctl plugin validate-contract --require-contract-kind message --for-publish --tag "${{ github.ref_name }}" .
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
@@ -30,9 +30,9 @@ jobs:
       - name: Verify shipped plugin.json carries tag (post-build)
         run: |
           if [ -f .release/plugin.json ]; then
-            wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --release-dir .release .
+            wfctl plugin validate-contract --require-contract-kind message --for-publish --tag "${{ github.ref_name }}" --release-dir .release .
           else
-            wfctl plugin validate-contract --for-publish --tag "${{ github.ref_name }}" --release-dir . .
+            wfctl plugin validate-contract --require-contract-kind message --for-publish --tag "${{ github.ref_name }}" --release-dir . .
           fi
       # workflow#765: runtime truth-check via plugin verify-capabilities.
       # Spawns the built plugin binary, calls PluginService.GetManifest via raw gRPC,

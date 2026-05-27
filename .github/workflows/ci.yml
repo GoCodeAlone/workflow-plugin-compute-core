@@ -27,8 +27,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: GoCodeAlone/setup-wfctl@v1
+      - uses: GoCodeAlone/setup-wfctl@bcd880980f5bbe8d192d0c20ff6279d25331f956
         with:
-          version: v0.63.1
+          version: v0.64.7
       - name: Validate plugin contract
-        run: wfctl plugin validate-contract .
+        run: wfctl plugin validate-contract --require-contract-kind message .
+      - name: Verify wfctl action pin
+        run: ./scripts/check-wfctl-action-pin.sh --workflow .github/workflows/ci.yml --workflow .github/workflows/release.yml --workflow .github/workflows/release-candidate.yml --wfctl-version v0.64.7
+      - name: Verify proto descriptors
+        run: ./scripts/check-proto.sh
