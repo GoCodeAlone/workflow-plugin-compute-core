@@ -33,19 +33,19 @@ for workflow in "${workflows[@]}"; do
     echo "$workflow: workflow file not found" >&2
     exit 1
   fi
-  if rg -n 'GoCodeAlone/setup-wfctl@v[0-9]+\b|GoCodeAlone/setup-wfctl@main\b' "$workflow"; then
+  if grep -En 'GoCodeAlone/setup-wfctl@v[0-9]+([^[:alnum:]_]|$)|GoCodeAlone/setup-wfctl@main([^[:alnum:]_]|$)' "$workflow"; then
     echo "$workflow: setup-wfctl must be pinned to an immutable commit SHA" >&2
     exit 1
   fi
-  if ! rg -n 'GoCodeAlone/setup-wfctl@[0-9a-f]{40}\b' "$workflow" >/dev/null; then
+  if ! grep -Eq 'GoCodeAlone/setup-wfctl@[0-9a-f]{40}([^0-9a-f]|$)' "$workflow"; then
     echo "$workflow: missing immutable setup-wfctl commit pin" >&2
     exit 1
   fi
-  if rg -n "version:[[:space:]]*${wfctl_version}\\b" "$workflow" >/dev/null; then
+  if grep -Eq "version:[[:space:]]*${wfctl_version}([^[:alnum:]_]|$)" "$workflow"; then
     continue
   fi
-  if rg -n 'wfctl_version:' "$workflow" >/dev/null &&
-     rg -n 'version:[[:space:]]*\$\{\{ inputs\.wfctl_version \}\}' "$workflow" >/dev/null; then
+  if grep -Eq 'wfctl_version:' "$workflow" &&
+     grep -Eq 'version:[[:space:]]*\$\{\{ inputs\.wfctl_version \}\}' "$workflow"; then
     continue
   fi
   echo "$workflow: missing wfctl version ${wfctl_version}" >&2
