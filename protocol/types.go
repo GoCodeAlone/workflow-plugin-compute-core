@@ -1588,6 +1588,111 @@ type RuntimeExecutionRequest struct {
 	Limits          ResourceLimits    `json:"limits,omitzero"`
 }
 
+type EnvRef struct {
+	Name      string `json:"name"`
+	ValueRef  string `json:"value_ref,omitempty"`
+	SecretRef string `json:"secret_ref,omitempty"`
+}
+
+func (r EnvRef) Validate() error {
+	var errs []error
+	if r.Name == "" {
+		errs = append(errs, errors.New("name is required"))
+	}
+	if r.ValueRef == "" && r.SecretRef == "" {
+		errs = append(errs, errors.New("requires value_ref or secret_ref"))
+	}
+	if r.ValueRef != "" && r.SecretRef != "" {
+		errs = append(errs, errors.New("cannot set both value_ref and secret_ref"))
+	}
+	return errors.Join(errs...)
+}
+
+type ConfidentialPayloadRef struct {
+	CiphertextRef  string `json:"ciphertext_ref"`
+	CiphertextHash string `json:"ciphertext_hash"`
+	KeyRefHash     string `json:"key_ref_hash"`
+	Algorithm      string `json:"algorithm"`
+	KBSPolicyID    string `json:"kbs_policy_id"`
+}
+
+func (r ConfidentialPayloadRef) Validate() error {
+	var errs []error
+	if err := validateScopedRef("ciphertext_ref", r.CiphertextRef, "artifact://"); err != nil {
+		errs = append(errs, err)
+	}
+	if !validSHA256Digest(r.CiphertextHash) {
+		errs = append(errs, errors.New("ciphertext_hash must be sha256:<64 hex chars>"))
+	}
+	if !validSHA256Digest(r.KeyRefHash) {
+		errs = append(errs, errors.New("key_ref_hash must be sha256:<64 hex chars>"))
+	}
+	if r.Algorithm == "" {
+		errs = append(errs, errors.New("algorithm is required"))
+	}
+	if r.KBSPolicyID == "" {
+		errs = append(errs, errors.New("kbs_policy_id is required"))
+	}
+	return errors.Join(errs...)
+}
+
+type CommandWorkload struct {
+	Args                []string                `json:"args"`
+	WorkingDirectory    string                  `json:"working_directory,omitempty"`
+	Env                 []EnvRef                `json:"env,omitempty"`
+	ArtifactRefs        []string                `json:"artifact_refs,omitempty"`
+	ArtifactAllowlist   []string                `json:"artifact_allowlist,omitempty"`
+	ConfidentialPayload *ConfidentialPayloadRef `json:"confidential_payload,omitempty"`
+}
+
+func (w CommandWorkload) Validate() error {
+	var errs []error
+	if len(w.Args) == 0 {
+		errs = append(errs, errors.New("command args are required"))
+	}
+	for i, ref := range w.Env {
+		if err := ref.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("env[%d]: %w", i, err))
+		}
+	}
+	for i, ref := range w.ArtifactRefs {
+		if err := validateScopedRef(fmt.Sprintf("artifact_refs[%d]", i), ref, "artifact://"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if w.ConfidentialPayload != nil {
+		if err := w.ConfidentialPayload.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("confidential_payload: %w", err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type ContainerBuildWorkload struct {
+	ContextDirectory string   `json:"context_directory"`
+	Dockerfile       string   `json:"dockerfile,omitempty"`
+	Tags             []string `json:"tags,omitempty"`
+	PushTargetRef    string   `json:"push_target_ref,omitempty"`
+	PullTargetRef    string   `json:"pull_target_ref,omitempty"`
+	Env              []EnvRef `json:"env,omitempty"`
+}
+
+func (w ContainerBuildWorkload) Validate() error {
+	var errs []error
+	if w.ContextDirectory == "" {
+		errs = append(errs, errors.New("context_directory is required"))
+	}
+	if len(w.Tags) == 0 {
+		errs = append(errs, errors.New("tags is required"))
+	}
+	for i, ref := range w.Env {
+		if err := ref.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("env[%d]: %w", i, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (r RuntimeExecutionRequest) Validate() error {
 	var errs []error
 	if r.ProtocolVersion != Version {

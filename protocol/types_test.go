@@ -389,6 +389,60 @@ func TestRuntimeDescriptorFallsBackToProviderNameAndDevVersion(t *testing.T) {
 	}
 }
 
+func TestCommandWorkloadContractUsesResolvedRefs(t *testing.T) {
+	workload := protocol.CommandWorkload{
+		Args: []string{"go", "test", "./..."},
+		Env: []protocol.EnvRef{
+			{Name: "GOPRIVATE", ValueRef: "config:goprivate"},
+			{Name: "GITHUB_TOKEN", SecretRef: "secret:github-token"},
+		},
+		ArtifactRefs: []string{"artifact://pool-1/input.tar"},
+		ConfidentialPayload: &protocol.ConfidentialPayloadRef{
+			CiphertextRef:  "artifact://pool-1/payload.cose",
+			CiphertextHash: protocol.CanonicalHash("ciphertext"),
+			KeyRefHash:     protocol.CanonicalHash("key-ref"),
+			Algorithm:      "trustee-envelope-v1",
+			KBSPolicyID:    "policy-1",
+		},
+	}
+
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("valid command workload rejected: %v", err)
+	}
+
+	workload.Env[0].SecretRef = "secret:goprivate"
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "cannot set both value_ref and secret_ref") {
+		t.Fatalf("env ref with both value and secret refs accepted: %v", err)
+	}
+
+	workload.Env[0].SecretRef = ""
+	workload.ConfidentialPayload.CiphertextRef = "https://example.invalid/payload.cose"
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "ciphertext_ref") {
+		t.Fatalf("origin URL confidential payload accepted: %v", err)
+	}
+}
+
+func TestContainerBuildWorkloadContractUsesRegistryRefs(t *testing.T) {
+	workload := protocol.ContainerBuildWorkload{
+		ContextDirectory: ".",
+		Tags:             []string{"example:latest"},
+		PushTargetRef:    "registry:ghcr",
+		PullTargetRef:    "registry:dockerhub",
+		Env: []protocol.EnvRef{
+			{Name: "DOCKER_CONFIG_JSON", SecretRef: "secret://pool-1/ghcr-docker-config"},
+		},
+	}
+
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("valid container-build workload rejected: %v", err)
+	}
+
+	workload.Env[0].ValueRef = "config:docker-config"
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "cannot set both value_ref and secret_ref") {
+		t.Fatalf("container-build env ref with both value and secret refs accepted: %v", err)
+	}
+}
+
 func TestExecutorRefValidateForProofRequiresDigestsForNonNativeExecutors(t *testing.T) {
 	ref := protocol.ExecutorRef{
 		Provider:              "sandboxed-command",
