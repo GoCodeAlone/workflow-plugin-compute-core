@@ -1175,6 +1175,123 @@ func TestProviderContractAcceptsAccessScopedProviderOperations(t *testing.T) {
 	}
 }
 
+func TestProviderOperationAcceptsProviderReturnArtifactIntent(t *testing.T) {
+	operation := protocol.ProviderOperation{
+		ID:                 "build",
+		InputSchemaRef:     "schema://providers/example/operations/build/input/v1",
+		InputSchemaDigest:  protocol.CanonicalHash("input"),
+		OutputSchemaRef:    "schema://providers/example/operations/build/output/v1",
+		OutputSchemaDigest: protocol.CanonicalHash("output"),
+		ArtifactSpecs: []protocol.ProviderArtifactSpec{{
+			Name:        "provenance",
+			Required:    true,
+			ContentType: "application/json",
+			ProviderReturn: &protocol.ProviderArtifactReturnSpec{
+				StepType:        "step.provider_artifact_return",
+				Contract:        "workflow-plugin-ci:step.provider_artifact_return",
+				ContractVersion: "v1",
+				SubmitEndpoint:  "/v1/provider-return/artifact-deliveries",
+			},
+		}},
+	}
+
+	if err := operation.Validate(); err != nil {
+		t.Fatalf("operation invalid: %v", err)
+	}
+	specs := operation.NormalizedArtifactSpecs()
+	if len(specs) != 1 || specs[0].ProviderReturn == nil || !specs[0].ProviderReturn.Enabled() {
+		t.Fatalf("provider return intent not preserved: %#v", specs)
+	}
+}
+
+func TestProviderOperationRejectsMalformedProviderReturnArtifactIntent(t *testing.T) {
+	valid := protocol.ProviderOperation{
+		ID:                 "build",
+		InputSchemaRef:     "schema://providers/example/operations/build/input/v1",
+		InputSchemaDigest:  protocol.CanonicalHash("input"),
+		OutputSchemaRef:    "schema://providers/example/operations/build/output/v1",
+		OutputSchemaDigest: protocol.CanonicalHash("output"),
+		ArtifactSpecs: []protocol.ProviderArtifactSpec{{
+			Name: "provenance",
+			ProviderReturn: &protocol.ProviderArtifactReturnSpec{
+				StepType:        "step.provider_artifact_return",
+				Contract:        "workflow-plugin-ci:step.provider_artifact_return",
+				ContractVersion: "v1",
+				SubmitEndpoint:  "/v1/provider-return/artifact-deliveries",
+			},
+		}},
+	}
+	cases := map[string]func(*protocol.ProviderArtifactReturnSpec){
+		"missing step type": func(spec *protocol.ProviderArtifactReturnSpec) {
+			spec.StepType = ""
+		},
+		"missing contract": func(spec *protocol.ProviderArtifactReturnSpec) {
+			spec.Contract = ""
+		},
+		"absolute submit endpoint": func(spec *protocol.ProviderArtifactReturnSpec) {
+			spec.SubmitEndpoint = "https://provider.example/upload"
+		},
+		"control whitespace": func(spec *protocol.ProviderArtifactReturnSpec) {
+			spec.Contract = "workflow-plugin-ci:step.provider_artifact_return\n"
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			operation := valid
+			returnSpec := *valid.ArtifactSpecs[0].ProviderReturn
+			mutate(&returnSpec)
+			operation.ArtifactSpecs = []protocol.ProviderArtifactSpec{{Name: "provenance", ProviderReturn: &returnSpec}}
+			if err := operation.Validate(); err == nil {
+				t.Fatalf("expected invalid provider return intent")
+			}
+		})
+	}
+}
+
+func TestProviderArtifactDeliveryValidatesStatusAndArtifactRef(t *testing.T) {
+	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	delivery := protocol.ProviderArtifactDelivery{
+		ProtocolVersion: protocol.Version,
+		ID:              "provider-artifact-delivery-1",
+		OrgID:           "gocodealone",
+		PoolID:          "ci",
+		TaskID:          "task-1",
+		ProofID:         "proof-1",
+		WorkerID:        "worker-1",
+		ProviderConfig: protocol.ProviderConfig{
+			PluginID:   "workflow-plugin-ci",
+			ProviderID: "ci",
+			ContractID: "ci.v1",
+			Version:    "v1",
+			ConfigRef:  "config://providers/ci",
+		},
+		Operation: "build",
+		ReturnSpec: protocol.ProviderArtifactReturnSpec{
+			StepType:        "step.provider_artifact_return",
+			Contract:        "workflow-plugin-ci:step.provider_artifact_return",
+			ContractVersion: "v1",
+			SubmitEndpoint:  "/v1/provider-return/artifact-deliveries",
+		},
+		Artifact: protocol.ProviderArtifactDeliveryArtifact{
+			Name:        "provenance",
+			Ref:         "artifact://ci/tasks/task-1/proofs/proof-1/provenance",
+			ContentType: "application/json",
+			SHA256:      protocol.CanonicalHash("artifact"),
+			SizeBytes:   42,
+		},
+		Status:    protocol.ProviderArtifactDeliveryPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := delivery.Validate(); err != nil {
+		t.Fatalf("delivery invalid: %v", err)
+	}
+	delivery.Status = protocol.ProviderArtifactDeliveryStatus("unknown")
+	if err := delivery.Validate(); err == nil || !strings.Contains(err.Error(), "status") {
+		t.Fatalf("expected status validation error, got %v", err)
+	}
+}
+
 func TestProviderContractRejectsPoolWithoutOrg(t *testing.T) {
 	contract := validBatchProviderContract()
 	contract.PoolID = "ci-runners"
