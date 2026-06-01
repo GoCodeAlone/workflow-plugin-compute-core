@@ -92,6 +92,155 @@ func TestRuntimeExecutionRequestRejectsMalformedInvocation(t *testing.T) {
 	}
 }
 
+func TestWorkloadSpecValidatesServiceWorkload(t *testing.T) {
+	workload := protocol.WorkloadSpec{
+		Kind: protocol.WorkloadService,
+		Service: &protocol.ServiceWorkload{
+			ComponentRef:    "provider://workflow-plugin-compute-service/service-runtime",
+			ComponentDigest: "sha256:" + strings.Repeat("a", 64),
+			Command:         []string{"serve", "--port", "8080"},
+			Ports:           []protocol.ServicePort{{Name: "http", Port: 8080, Protocol: "http"}},
+			HealthCheck: protocol.HealthCheck{
+				Kind:            "http",
+				Path:            "/healthz",
+				IntervalSeconds: 5,
+				TimeoutSeconds:  2,
+			},
+			Ingress: protocol.IngressPolicy{Mode: "private", AuthRequired: true},
+			Env:     []protocol.EnvRef{{Name: "PORT", ValueRef: "config://service/port"}},
+			Files: []protocol.WorkloadFileRef{{
+				Path:     "config/app.toml",
+				Template: "port={{ .PORT }}",
+				Refs:     []protocol.EnvRef{{Name: "PORT", ValueRef: "config://service/port"}},
+				Mode:     0o640,
+			}},
+		},
+	}
+
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("service workload invalid: %v", err)
+	}
+}
+
+func TestServiceWorkloadRejectsUnsafeShape(t *testing.T) {
+	workload := protocol.ServiceWorkload{
+		ImageRef:      "repo/service:latest bad",
+		ComponentRef:  "provider://workflow-plugin-compute-service/service-runtime",
+		Ports:         []protocol.ServicePort{{Port: 8080, Protocol: "http"}},
+		HealthCheck:   protocol.HealthCheck{Kind: "http", Path: "/healthz", IntervalSeconds: 5, TimeoutSeconds: 2},
+		Ingress:       protocol.IngressPolicy{Mode: "none", AllowedCIDRs: []string{"not-a-cidr"}},
+		DataDirRef:    "volume://service-data",
+		DataMountPath: "../data",
+	}
+
+	err := workload.Validate()
+	if err == nil {
+		t.Fatal("expected unsafe service workload to fail")
+	}
+	for _, want := range []string{
+		"mutually exclusive",
+		"whitespace or NUL",
+		"component_digest",
+		"ports must be empty",
+		"headless service requires command health check",
+		"allowed_cidrs",
+		"data_mount_path",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate() = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestWorkloadSpecValidatesNodeServiceWorkload(t *testing.T) {
+	endpoint := "node.example.invalid:30303"
+	workload := protocol.WorkloadSpec{
+		Kind: protocol.WorkloadNodeService,
+		NodeService: &protocol.NodeServiceWorkload{
+			ImageRef:     "ghcr.io/gocodealone/node@sha256:" + strings.Repeat("b", 64),
+			Chain:        "ethereum",
+			Network:      "sepolia",
+			DataDirRef:   "volume://nodes/sepolia",
+			RPCSecretRef: "secret://nodes/sepolia/rpc",
+			PeerPolicy: protocol.PeerPolicy{
+				Mode:            "allowlist",
+				AllowedPeers:    []string{endpoint},
+				EgressAllowlist: []string{endpoint},
+			},
+			ArtifactRefs: []string{"artifact://snapshots/sepolia"},
+			Command:      []string{"node", "--network", "sepolia"},
+			HealthCheck: protocol.HealthCheck{
+				Kind:            "command",
+				Command:         []string{"node", "status"},
+				IntervalSeconds: 10,
+				TimeoutSeconds:  3,
+			},
+			Env: []protocol.EnvRef{{Name: "RPC_TOKEN", SecretRef: "secret://nodes/sepolia/rpc"}},
+		},
+	}
+
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("node-service workload invalid: %v", err)
+	}
+}
+
+func TestNodeServiceWorkloadRejectsMissingHealthAndUnsafePeers(t *testing.T) {
+	workload := protocol.NodeServiceWorkload{
+		ImageRef:     "ghcr.io/gocodealone/node@sha256:" + strings.Repeat("c", 64),
+		Chain:        "ethereum",
+		Network:      "mainnet",
+		DataDirRef:   "volume://nodes/mainnet",
+		RPCSecretRef: "secret://nodes/mainnet/rpc",
+		PeerPolicy: protocol.PeerPolicy{
+			Mode:            "allowlist",
+			AllowedPeers:    []string{"https://peer.example.invalid:30303/path", "peer.example.invalid:notaport"},
+			EgressAllowlist: []string{"other.example.invalid:30303"},
+		},
+	}
+
+	err := workload.Validate()
+	if err == nil {
+		t.Fatal("expected unsafe node-service workload to fail")
+	}
+	for _, want := range []string{"peer_policy", "allowed_peers", "port", "health_check"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate() = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestWorkloadSpecAllowsReservedHostWorkloadKinds(t *testing.T) {
+	for _, kind := range []protocol.WorkloadKind{protocol.WorkloadContentCache, protocol.WorkloadSupervisor} {
+		if err := (protocol.WorkloadSpec{Kind: kind}).Validate(); err != nil {
+			t.Fatalf("%s workload spec rejected: %v", kind, err)
+		}
+	}
+}
+
+func TestWorkloadFileRefRejectsTrimmedAbsolutePath(t *testing.T) {
+	ref := protocol.WorkloadFileRef{
+		Path:     " /etc/passwd",
+		ValueRef: "config://service/file",
+	}
+
+	err := ref.Validate()
+	if err == nil || !strings.Contains(err.Error(), "relative workspace path") {
+		t.Fatalf("absolute path with leading whitespace accepted: %v", err)
+	}
+}
+
+func TestPeerPolicyCanonicalizesNumericPort(t *testing.T) {
+	policy := protocol.PeerPolicy{
+		Mode:            "allowlist",
+		AllowedPeers:    []string{"node.example.invalid:030303"},
+		EgressAllowlist: []string{"node.example.invalid:30303"},
+	}
+
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("equivalent numeric peer ports rejected: %v", err)
+	}
+}
+
 func TestServiceIngressEvidenceValidation(t *testing.T) {
 	evidence := validServiceIngressEvidence()
 	if err := evidence.Validate(); err != nil {
