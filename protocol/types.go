@@ -2307,9 +2307,13 @@ func (w WASMWorkload) Validate() error {
 }
 
 func validateProviderComponentRef(name, value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
+	raw := value
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
 		return fmt.Errorf("%s is required", name)
+	}
+	if raw != trimmed {
+		return fmt.Errorf("%s must not contain surrounding whitespace", name)
 	}
 	if strings.ContainsAny(value, " \t\r\n\x00") {
 		return fmt.Errorf("%s must not contain whitespace or NUL", name)
@@ -4856,9 +4860,13 @@ func validateScopedRef(name, value, scheme string) error {
 }
 
 func validateComponentRef(name, value string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
+	raw := value
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
 		return fmt.Errorf("%s is required", name)
+	}
+	if raw != trimmed {
+		return fmt.Errorf("%s must not contain surrounding whitespace", name)
 	}
 	for _, prefix := range []string{"artifact://", "content://", "provider://"} {
 		if strings.HasPrefix(value, prefix) && !strings.ContainsAny(value, " \t\r\n\x00") {
