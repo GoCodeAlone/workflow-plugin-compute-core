@@ -443,6 +443,68 @@ func TestContainerBuildWorkloadContractUsesRegistryRefs(t *testing.T) {
 	}
 }
 
+func TestWASMRuntimePayloadContracts(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	wasm := protocol.WASMWorkload{
+		ComponentRef:    "artifact://edge/echo.wasm",
+		ComponentDigest: digest,
+		ABI:             "wasm-export-i32-v1",
+		Operation:       "handle_request",
+		Input:           json.RawMessage(`{"path":"/index.html"}`),
+	}
+	if err := wasm.Validate(); err != nil {
+		t.Fatalf("valid wasm workload rejected: %v", err)
+	}
+	wasm.ComponentRef = "file:///tmp/evil.wasm"
+	if err := wasm.Validate(); err == nil || !strings.Contains(err.Error(), "component_ref") {
+		t.Fatalf("host ref accepted: %v", err)
+	}
+
+	provider := protocol.ProviderWorkload{
+		ProviderConfig: protocol.ProviderConfig{
+			PluginID:   "workflow-plugin-product-capture",
+			ProviderID: "browser",
+			ContractID: "product-capture.browser.v1",
+			Version:    "v0.1.0",
+			ConfigRef:  "config://browser",
+		},
+		Operation:       "capture",
+		ComponentRef:    "provider://workflow-plugin-product-capture/browser.wasm",
+		ComponentDigest: digest,
+		ABI:             "wasm-export-i32-v1",
+		Input:           json.RawMessage(`{"url":"https://example.invalid"}`),
+	}
+	if err := provider.Validate(); err != nil {
+		t.Fatalf("valid provider workload rejected: %v", err)
+	}
+	provider.ComponentRef = "provider://other-plugin/browser.wasm"
+	if err := provider.Validate(); err == nil || !strings.Contains(err.Error(), "provider plugin") {
+		t.Fatalf("mismatched provider component accepted: %v", err)
+	}
+}
+
+func TestProductCaptureWorkloadValidation(t *testing.T) {
+	workload := protocol.ProductCaptureWorkload{
+		URL:            "https://www.amazon.com/dp/B08H75RTZ8",
+		AllowedHosts:   []string{"www.amazon.com", "amazon.com"},
+		CaptureMode:    protocol.ProductCaptureModeBrowser,
+		TimeoutSeconds: 30,
+		MaxHTMLBytes:   1 << 20,
+		MaxImageCount:  8,
+	}
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("valid product-capture workload rejected: %v", err)
+	}
+	workload.URL = "https://evil.example/item"
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "allowed_hosts") {
+		t.Fatalf("disallowed host accepted: %v", err)
+	}
+	workload.URL = "file:///tmp/item"
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "http") {
+		t.Fatalf("non-http URL accepted: %v", err)
+	}
+}
+
 func TestExecutorRefValidateForProofRequiresDigestsForNonNativeExecutors(t *testing.T) {
 	ref := protocol.ExecutorRef{
 		Provider:              "sandboxed-command",
