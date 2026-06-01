@@ -209,6 +209,38 @@ func TestNodeServiceWorkloadRejectsMissingHealthAndUnsafePeers(t *testing.T) {
 	}
 }
 
+func TestWorkloadSpecAllowsReservedHostWorkloadKinds(t *testing.T) {
+	for _, kind := range []protocol.WorkloadKind{protocol.WorkloadContentCache, protocol.WorkloadSupervisor} {
+		if err := (protocol.WorkloadSpec{Kind: kind}).Validate(); err != nil {
+			t.Fatalf("%s workload spec rejected: %v", kind, err)
+		}
+	}
+}
+
+func TestWorkloadFileRefRejectsTrimmedAbsolutePath(t *testing.T) {
+	ref := protocol.WorkloadFileRef{
+		Path:     " /etc/passwd",
+		ValueRef: "config://service/file",
+	}
+
+	err := ref.Validate()
+	if err == nil || !strings.Contains(err.Error(), "relative workspace path") {
+		t.Fatalf("absolute path with leading whitespace accepted: %v", err)
+	}
+}
+
+func TestPeerPolicyCanonicalizesNumericPort(t *testing.T) {
+	policy := protocol.PeerPolicy{
+		Mode:            "allowlist",
+		AllowedPeers:    []string{"node.example.invalid:030303"},
+		EgressAllowlist: []string{"node.example.invalid:30303"},
+	}
+
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("equivalent numeric peer ports rejected: %v", err)
+	}
+}
+
 func TestServiceIngressEvidenceValidation(t *testing.T) {
 	evidence := validServiceIngressEvidence()
 	if err := evidence.Validate(); err != nil {

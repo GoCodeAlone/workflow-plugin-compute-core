@@ -1660,7 +1660,7 @@ func (w WorkloadSpec) Validate() error {
 			return errors.New("wasm workload is required")
 		}
 		return w.WASM.Validate()
-	case WorkloadDockerComposeBuild, WorkloadBenchmark, WorkloadTraining:
+	case WorkloadDockerComposeBuild, WorkloadBenchmark, WorkloadTraining, WorkloadContentCache, WorkloadSupervisor:
 		return nil
 	default:
 		return fmt.Errorf("workload kind %q is unknown", w.Kind)
@@ -1678,10 +1678,11 @@ type WorkloadFileRef struct {
 
 func (r WorkloadFileRef) Validate() error {
 	var errs []error
-	cleanPath := path.Clean(strings.TrimSpace(r.Path))
-	if r.Path == "" {
+	trimmedPath := strings.TrimSpace(r.Path)
+	cleanPath := path.Clean(trimmedPath)
+	if trimmedPath == "" {
 		errs = append(errs, errors.New("path is required"))
-	} else if strings.HasPrefix(r.Path, "/") || strings.Contains(r.Path, "\\") || cleanPath == "." || strings.HasPrefix(cleanPath, "../") || cleanPath == ".." {
+	} else if trimmedPath != r.Path || strings.HasPrefix(trimmedPath, "/") || strings.Contains(trimmedPath, "\\") || cleanPath == "." || strings.HasPrefix(cleanPath, "../") || cleanPath == ".." {
 		errs = append(errs, errors.New("path must be a relative workspace path"))
 	}
 	directRefs := 0
@@ -1937,7 +1938,7 @@ func (p IngressPolicy) Validate() error {
 		}
 	case "internal", "private", "public":
 		if !p.AuthRequired {
-			errs = append(errs, errors.New("auth_required is required"))
+			errs = append(errs, errors.New("auth_required must be true"))
 		}
 	default:
 		errs = append(errs, fmt.Errorf("mode %q is unsupported", p.Mode))
@@ -2055,7 +2056,7 @@ func validatePeerEndpoint(field string, index int, endpoint string) (string, err
 	if strings.ContainsAny(host, " \t\r\n:") && net.ParseIP(host) == nil {
 		return "", fmt.Errorf("%s[%d] host is invalid", field, index)
 	}
-	return net.JoinHostPort(host, port), nil
+	return net.JoinHostPort(host, strconv.Itoa(portNumber)), nil
 }
 
 type ConfidentialPayloadRef struct {
