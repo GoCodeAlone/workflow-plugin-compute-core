@@ -152,6 +152,20 @@ func TestServiceWorkloadRejectsUnsafeShape(t *testing.T) {
 	}
 }
 
+func TestServiceWorkloadRejectsComponentRefWhitespace(t *testing.T) {
+	workload := protocol.ServiceWorkload{
+		ComponentRef:    " provider://workflow-plugin-compute-service/service-runtime",
+		ComponentDigest: "sha256:" + strings.Repeat("a", 64),
+		Command:         []string{"serve", "--port", "8080"},
+		Ports:           []protocol.ServicePort{{Name: "http", Port: 8080, Protocol: "http"}},
+		HealthCheck:     protocol.HealthCheck{Kind: "http", Path: "/healthz", IntervalSeconds: 5, TimeoutSeconds: 2},
+		Ingress:         protocol.IngressPolicy{Mode: "private", AuthRequired: true},
+	}
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
+		t.Fatalf("service workload accepted whitespace-padded component_ref: %v", err)
+	}
+}
+
 func TestWorkloadSpecValidatesNodeServiceWorkload(t *testing.T) {
 	endpoint := "node.example.invalid:30303"
 	workload := protocol.WorkloadSpec{
@@ -181,6 +195,27 @@ func TestWorkloadSpecValidatesNodeServiceWorkload(t *testing.T) {
 
 	if err := workload.Validate(); err != nil {
 		t.Fatalf("node-service workload invalid: %v", err)
+	}
+}
+
+func TestNodeServiceWorkloadRejectsComponentRefWhitespace(t *testing.T) {
+	endpoint := "node.example.invalid:30303"
+	workload := protocol.NodeServiceWorkload{
+		ComponentRef:    "provider://workflow-plugin-compute-service/node-runtime ",
+		ComponentDigest: "sha256:" + strings.Repeat("b", 64),
+		Chain:           "ethereum",
+		Network:         "sepolia",
+		DataDirRef:      "volume://nodes/sepolia",
+		RPCSecretRef:    "secret://nodes/sepolia/rpc",
+		PeerPolicy: protocol.PeerPolicy{
+			Mode:            "allowlist",
+			AllowedPeers:    []string{endpoint},
+			EgressAllowlist: []string{endpoint},
+		},
+		HealthCheck: protocol.HealthCheck{Kind: "command", Command: []string{"node", "status"}, IntervalSeconds: 10, TimeoutSeconds: 3},
+	}
+	if err := workload.Validate(); err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
+		t.Fatalf("node-service workload accepted whitespace-padded component_ref: %v", err)
 	}
 }
 
