@@ -25,6 +25,7 @@ func TestTaskRejectsMalformedPortableContract(t *testing.T) {
 	task.Workload = protocol.WorkloadSpec{Kind: protocol.WorkloadProvider}
 	task.TimeoutSeconds = -1
 	task.ResourceLimits = protocol.ResourceLimits{RuntimeSeconds: -1}
+	task.Signature = protocol.SignatureEnvelope{}
 
 	err := task.Validate()
 	if err == nil {
@@ -37,6 +38,7 @@ func TestTaskRejectsMalformedPortableContract(t *testing.T) {
 		"workload",
 		"timeout_seconds",
 		"resource_limits",
+		"signature",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Validate() = %v, want %q", err, want)

@@ -118,6 +118,25 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 	}
 }
 
+func TestClientPreservesServerURLBasePath(t *testing.T) {
+	task := validTask(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/tasks" {
+			t.Fatalf("request = %s %s, want POST /api/v1/tasks", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(protocol.TaskResponse{Task: task})
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL + "/api"})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if _, err := client.SubmitTask(context.Background(), task); err != nil {
+		t.Fatalf("submit task: %v", err)
+	}
+}
+
 func TestClientRejectsTokenOverNonLoopbackHTTP(t *testing.T) {
 	if _, err := protocol.NewClient(protocol.ClientConfig{ServerURL: "http://example.test", Token: "secret"}); err == nil {
 		t.Fatal("expected token over non-loopback http to fail")

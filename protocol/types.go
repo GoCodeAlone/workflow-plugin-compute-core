@@ -3307,6 +3307,9 @@ func (t Task) Validate() error {
 	if err := t.ResourceLimits.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("resource_limits: %w", err))
 	}
+	if err := validateSignatureEnvelope(t.Signature, "signature"); err != nil {
+		errs = append(errs, err)
+	}
 	if t.RequestedAt.IsZero() {
 		errs = append(errs, errors.New("requested_at is required"))
 	}
