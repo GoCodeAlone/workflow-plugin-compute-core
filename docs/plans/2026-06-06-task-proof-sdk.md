@@ -31,7 +31,7 @@
 |------|-------|-------|--------|
 | 1 | feat: add task proof sdk | Task 1, Task 2, Task 3, Task 4, Task 5 | feat/task-proof-sdk |
 
-**Status:** Draft
+**Status:** Locked 2026-06-06T04:30:58Z
 
 ## Requirements Trace
 
