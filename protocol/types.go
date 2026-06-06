@@ -604,6 +604,20 @@ func validateVerifiedSignature(prefix string, sig SignatureEnvelope) error {
 	return errors.Join(errs...)
 }
 
+func validateSignatureEnvelope(sig SignatureEnvelope, name string) error {
+	var errs []error
+	if strings.TrimSpace(sig.Algorithm) == "" {
+		errs = append(errs, fmt.Errorf("%s.algorithm is required", name))
+	}
+	if strings.TrimSpace(sig.KeyID) == "" {
+		errs = append(errs, fmt.Errorf("%s.key_id is required", name))
+	}
+	if strings.TrimSpace(sig.Value) == "" {
+		errs = append(errs, fmt.Errorf("%s.value is required", name))
+	}
+	return errors.Join(errs...)
+}
+
 func ExecutorMatchesPlacementRequirements(executor ExecutorRef, req PlacementRequirements) bool {
 	if req.ExecutorProvider != "" && executor.Provider != req.ExecutorProvider {
 		return false
@@ -2815,6 +2829,276 @@ const (
 	NetworkModeOffline NetworkMode = "offline"
 )
 
+type NetworkDestination struct {
+	Protocol   string `json:"protocol,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	ContentRef string `json:"content_ref,omitempty"`
+}
+
+func (d NetworkDestination) Validate() error {
+	var errs []error
+	if d.ContentRef != "" {
+		if d.Protocol != "" || d.Host != "" || d.Port != 0 {
+			errs = append(errs, errors.New("content_ref is mutually exclusive with protocol, host, and port"))
+		}
+		if !strings.HasPrefix(d.ContentRef, "artifact://") && !strings.HasPrefix(d.ContentRef, "content://") {
+			errs = append(errs, errors.New("content_ref must use artifact:// or content:// scoped ref"))
+		}
+		return errors.Join(errs...)
+	}
+	if strings.TrimSpace(d.Host) == "" {
+		errs = append(errs, errors.New("host is required"))
+	} else if err := validateNetworkHostname(d.Host); err != nil {
+		errs = append(errs, fmt.Errorf("host: %w", err))
+	}
+	if d.Port < 0 || d.Port > 65535 {
+		errs = append(errs, errors.New("port must be between 0 and 65535"))
+	}
+	if d.Protocol != "" {
+		switch strings.ToLower(strings.TrimSpace(d.Protocol)) {
+		case "tcp", "udp", "http", "https":
+		default:
+			errs = append(errs, fmt.Errorf("protocol %q is unsupported", d.Protocol))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type NetworkPolicy struct {
+	Mode                NetworkMode          `json:"mode,omitempty"`
+	AllowedDestinations []NetworkDestination `json:"allowed_destinations,omitempty"`
+	IngressHostnames    []string             `json:"ingress_hostnames,omitempty"`
+	AllowIngress        bool                 `json:"allow_ingress,omitempty"`
+	AuditDestinations   bool                 `json:"audit_destinations,omitempty"`
+}
+
+func (p NetworkPolicy) Validate() error {
+	p.Mode = normalizeNetworkMode(p.Mode)
+	var errs []error
+	if !validNetworkMode(p.Mode) {
+		errs = append(errs, fmt.Errorf("network mode %q is unsupported", p.Mode))
+	}
+	if len(p.IngressHostnames) > 0 && !p.AllowIngress {
+		errs = append(errs, errors.New("allow_ingress is required when ingress_hostnames are set"))
+	}
+	for i, destination := range p.AllowedDestinations {
+		if err := destination.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("allowed_destinations[%d]: %w", i, err))
+		}
+	}
+	for i, hostname := range p.IngressHostnames {
+		if err := validateNetworkHostname(hostname); err != nil {
+			errs = append(errs, fmt.Errorf("ingress_hostnames[%d]: %w", i, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type P2PSessionMode string
+
+const (
+	P2PSessionModeRelay   P2PSessionMode = "relay"
+	P2PSessionModeStream  P2PSessionMode = "p2p_stream"
+	P2PSessionModeContent P2PSessionMode = "p2p_content"
+)
+
+type P2PSessionPolicy struct {
+	ProtocolVersion        string               `json:"protocol_version,omitempty"`
+	SessionID              string               `json:"session_id"`
+	ProductID              string               `json:"product_id"`
+	OrgID                  string               `json:"org_id"`
+	NetworkID              string               `json:"network_id"`
+	OperatorID             string               `json:"operator_id"`
+	PolicyVersion          string               `json:"policy_version"`
+	IssuedAt               time.Time            `json:"issued_at"`
+	NotBefore              time.Time            `json:"not_before"`
+	ExpiresAt              time.Time            `json:"expires_at"`
+	SessionGeneration      int                  `json:"session_generation"`
+	EventID                string               `json:"event_id"`
+	Nonce                  string               `json:"nonce"`
+	Mode                   P2PSessionMode       `json:"mode"`
+	Peers                  []P2PSessionPeer     `json:"peers"`
+	AllowedProtocols       []string             `json:"allowed_protocols"`
+	ContentRefs            []string             `json:"content_refs,omitempty"`
+	RouteRefs              []string             `json:"route_refs,omitempty"`
+	AllowedDestinations    []NetworkDestination `json:"allowed_destinations,omitempty"`
+	IngressHostnames       []string             `json:"ingress_hostnames,omitempty"`
+	Limits                 P2PSessionLimits     `json:"limits"`
+	ProofPolicy            string               `json:"proof_policy,omitempty"`
+	RewardPolicyRef        string               `json:"reward_policy_ref,omitempty"`
+	RevocationFeedID       string               `json:"revocation_feed_id"`
+	RevocationFreshUntil   time.Time            `json:"revocation_fresh_until"`
+	KillDirectiveRefs      []string             `json:"kill_directive_refs,omitempty"`
+	PreviousGenerationHash string               `json:"previous_generation_hash,omitempty"`
+	PolicyHash             string               `json:"policy_hash"`
+	Signature              SignatureEnvelope    `json:"signature"`
+}
+
+type P2PSessionPeer struct {
+	ID             string `json:"id"`
+	Role           string `json:"role"`
+	Alias          string `json:"alias,omitempty"`
+	ContentURL     string `json:"content_url,omitempty"`
+	IdentitySHA256 string `json:"identity_sha256,omitempty"`
+}
+
+func (p P2PSessionPeer) Validate() error {
+	var errs []error
+	if err := validateIdentifier("id", p.ID); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateIdentifier("role", p.Role); err != nil {
+		errs = append(errs, err)
+	}
+	if p.IdentitySHA256 != "" && !validSHA256Digest(p.IdentitySHA256) {
+		errs = append(errs, errors.New("identity_sha256 must be sha256 digest"))
+	}
+	return errors.Join(errs...)
+}
+
+type P2PSessionLimits struct {
+	MaxPeers           int   `json:"max_peers"`
+	MaxBytesPerPeer    int64 `json:"max_bytes_per_peer,omitempty"`
+	MaxSessionBytes    int64 `json:"max_session_bytes,omitempty"`
+	MaxDurationSeconds int   `json:"max_duration_seconds,omitempty"`
+}
+
+func (l P2PSessionLimits) Validate() error {
+	var errs []error
+	if l.MaxPeers <= 0 {
+		errs = append(errs, errors.New("max_peers must be positive"))
+	}
+	if l.MaxBytesPerPeer < 0 {
+		errs = append(errs, errors.New("max_bytes_per_peer must be non-negative"))
+	}
+	if l.MaxSessionBytes < 0 {
+		errs = append(errs, errors.New("max_session_bytes must be non-negative"))
+	}
+	if l.MaxDurationSeconds < 0 {
+		errs = append(errs, errors.New("max_duration_seconds must be non-negative"))
+	}
+	return errors.Join(errs...)
+}
+
+func (p P2PSessionPolicy) SigningPayload() P2PSessionPolicy {
+	p.PolicyHash = ""
+	p.Signature = SignatureEnvelope{}
+	return p
+}
+
+func (p P2PSessionPolicy) Validate(now time.Time) error {
+	var errs []error
+	if p.ProtocolVersion != "" && p.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "session_id", value: p.SessionID},
+		{name: "org_id", value: p.OrgID},
+		{name: "network_id", value: p.NetworkID},
+		{name: "operator_id", value: p.OperatorID},
+		{name: "policy_version", value: p.PolicyVersion},
+		{name: "event_id", value: p.EventID},
+		{name: "nonce", value: p.Nonce},
+		{name: "revocation_feed_id", value: p.RevocationFeedID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := validateNetworkProductID(p.ProductID); err != nil {
+		errs = append(errs, err)
+	}
+	if p.IssuedAt.IsZero() {
+		errs = append(errs, errors.New("issued_at is required"))
+	}
+	if p.NotBefore.IsZero() {
+		errs = append(errs, errors.New("not_before is required"))
+	}
+	if p.ExpiresAt.IsZero() {
+		errs = append(errs, errors.New("expires_at is required"))
+	}
+	if !p.IssuedAt.IsZero() && !p.NotBefore.IsZero() && p.NotBefore.Before(p.IssuedAt) {
+		errs = append(errs, errors.New("not_before must not be before issued_at"))
+	}
+	if !p.NotBefore.IsZero() && !p.ExpiresAt.IsZero() && !p.NotBefore.Before(p.ExpiresAt) {
+		errs = append(errs, errors.New("not_before must be before expires_at"))
+	}
+	if !now.IsZero() {
+		if !p.NotBefore.IsZero() && now.Before(p.NotBefore) {
+			errs = append(errs, errors.New("session policy not yet valid"))
+		}
+		if !p.ExpiresAt.IsZero() && !now.Before(p.ExpiresAt) {
+			errs = append(errs, errors.New("session policy expired"))
+		}
+	}
+	if p.SessionGeneration <= 0 {
+		errs = append(errs, errors.New("session_generation must be positive"))
+	}
+	switch p.Mode {
+	case P2PSessionModeRelay, P2PSessionModeStream, P2PSessionModeContent:
+	case "":
+		errs = append(errs, errors.New("mode is required"))
+	default:
+		errs = append(errs, fmt.Errorf("mode %q is unsupported", p.Mode))
+	}
+	if len(p.Peers) == 0 {
+		errs = append(errs, errors.New("peers is required"))
+	}
+	seenPeers := map[string]struct{}{}
+	for i, peer := range p.Peers {
+		if err := peer.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("peers[%d]: %w", i, err))
+		}
+		if _, exists := seenPeers[peer.ID]; exists {
+			errs = append(errs, fmt.Errorf("peers[%d].id is duplicated", i))
+		}
+		seenPeers[peer.ID] = struct{}{}
+	}
+	if err := p.Limits.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("limits: %w", err))
+	}
+	if p.Limits.MaxPeers > 0 && len(p.Peers) > p.Limits.MaxPeers {
+		errs = append(errs, errors.New("peers exceed max_peers"))
+	}
+	if len(p.AllowedProtocols) == 0 {
+		errs = append(errs, errors.New("allowed_protocols is required"))
+	}
+	if p.Mode == P2PSessionModeContent && len(p.ContentRefs) == 0 {
+		errs = append(errs, errors.New("content_refs is required"))
+	}
+	for i, destination := range p.AllowedDestinations {
+		if err := destination.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("allowed_destinations[%d]: %w", i, err))
+		}
+	}
+	for i, hostname := range p.IngressHostnames {
+		if err := validateNetworkHostname(hostname); err != nil {
+			errs = append(errs, fmt.Errorf("ingress_hostnames[%d]: %w", i, err))
+		}
+	}
+	if p.RevocationFreshUntil.IsZero() {
+		errs = append(errs, errors.New("revocation_fresh_until is required"))
+	} else if !now.IsZero() && !p.RevocationFreshUntil.After(now) {
+		errs = append(errs, errors.New("revocation_fresh_until must be in the future"))
+	}
+	if p.PreviousGenerationHash != "" && !validSHA256Digest(p.PreviousGenerationHash) {
+		errs = append(errs, errors.New("previous_generation_hash must be sha256 digest"))
+	}
+	if p.PolicyHash == "" {
+		errs = append(errs, errors.New("policy_hash is required"))
+	} else if !validSHA256Digest(p.PolicyHash) {
+		errs = append(errs, errors.New("policy_hash must be sha256 digest"))
+	}
+	if err := validateSignatureEnvelope(p.Signature, "signature"); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
 type PlacementRequirements struct {
 	ExecutorProvider      string                `json:"executor_provider,omitempty"`
 	ExecutionSecurityTier ExecutionSecurityTier `json:"execution_security_tier,omitempty"`
@@ -2938,6 +3222,193 @@ func (p AccessPolicy) Validate() error {
 	}
 	if !validAccessVisibility(p.ArtifactVisibility) {
 		errs = append(errs, fmt.Errorf("artifact_visibility %q is unsupported", p.ArtifactVisibility))
+	}
+	return errors.Join(errs...)
+}
+
+type TaskStatus string
+
+const (
+	TaskQueued    TaskStatus = "queued"
+	TaskLeased    TaskStatus = "leased"
+	TaskRunning   TaskStatus = "running"
+	TaskSucceeded TaskStatus = "succeeded"
+	TaskFailed    TaskStatus = "failed"
+	TaskStalled   TaskStatus = "stalled"
+	TaskCanceled  TaskStatus = "canceled"
+)
+
+type Task struct {
+	ProtocolVersion  string                `json:"protocol_version"`
+	ID               string                `json:"id"`
+	ProductID        string                `json:"product_id,omitempty"`
+	OrgID            string                `json:"org_id"`
+	PoolID           string                `json:"pool_id"`
+	PolicyID         string                `json:"policy_id"`
+	Status           TaskStatus            `json:"status,omitempty"`
+	Workload         WorkloadSpec          `json:"workload"`
+	Requirements     PlacementRequirements `json:"requirements,omitzero"`
+	ProofPolicy      ProofPolicy           `json:"proof_policy,omitzero"`
+	NetworkPolicy    NetworkPolicy         `json:"network_policy,omitzero"`
+	P2PSessionPolicy *P2PSessionPolicy     `json:"p2p_session_policy,omitempty"`
+	AccessPolicy     AccessPolicy          `json:"access_policy,omitzero"`
+	ResiduePolicy    ResiduePolicy         `json:"residue_policy,omitzero"`
+	ResourceLimits   ResourceLimits        `json:"resource_limits,omitzero"`
+	InputHash        string                `json:"input_hash"`
+	RequestedAt      time.Time             `json:"requested_at"`
+	TimeoutSeconds   int                   `json:"timeout_seconds"`
+	Labels           map[string]string     `json:"labels,omitempty"`
+	Signature        SignatureEnvelope     `json:"signature"`
+}
+
+func (t Task) Validate() error {
+	var errs []error
+	if t.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: t.ID},
+		{name: "org_id", value: t.OrgID},
+		{name: "pool_id", value: t.PoolID},
+		{name: "policy_id", value: t.PolicyID},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			errs = append(errs, fmt.Errorf("%s is required", field.name))
+		}
+	}
+	if !validTaskStatus(t.Status) {
+		errs = append(errs, fmt.Errorf("status %q is unsupported", t.Status))
+	}
+	if err := t.Workload.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("workload: %w", err))
+	}
+	if err := ValidateProofPolicy(t.Requirements.ProofTier, t.ProofPolicy); err != nil {
+		errs = append(errs, err)
+	}
+	if err := t.NetworkPolicy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("network_policy: %w", err))
+	}
+	if t.P2PSessionPolicy != nil {
+		if err := t.P2PSessionPolicy.Validate(time.Time{}); err != nil {
+			errs = append(errs, fmt.Errorf("p2p_session_policy: %w", err))
+		}
+	}
+	if err := t.AccessPolicy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("access_policy: %w", err))
+	}
+	if err := t.ResiduePolicy.Validate(ResiduePolicyValidation{}); err != nil {
+		errs = append(errs, fmt.Errorf("residue_policy: %w", err))
+	}
+	if err := t.ResourceLimits.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("resource_limits: %w", err))
+	}
+	if t.RequestedAt.IsZero() {
+		errs = append(errs, errors.New("requested_at is required"))
+	}
+	if t.TimeoutSeconds <= 0 {
+		errs = append(errs, errors.New("timeout_seconds must be positive"))
+	}
+	return errors.Join(errs...)
+}
+
+func validTaskStatus(status TaskStatus) bool {
+	switch status {
+	case "", TaskQueued, TaskLeased, TaskRunning, TaskSucceeded, TaskFailed, TaskStalled, TaskCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+type GPU struct {
+	Vendor      string `json:"vendor,omitempty"`
+	Name        string `json:"name,omitempty"`
+	MemoryBytes int64  `json:"memory_bytes,omitempty"`
+}
+
+type Capabilities struct {
+	MachineID         string                       `json:"machine_id,omitempty"`
+	OS                string                       `json:"os,omitempty"`
+	Arch              string                       `json:"arch,omitempty"`
+	CPUModel          string                       `json:"cpu_model,omitempty"`
+	CPUCount          int                          `json:"cpu_count,omitempty"`
+	MemoryBytes       int64                        `json:"memory_bytes,omitempty"`
+	DiskBytes         int64                        `json:"disk_bytes,omitempty"`
+	BandwidthMbps     int64                        `json:"bandwidth_mbps,omitempty"`
+	IngressCapable    bool                         `json:"ingress_capable,omitempty"`
+	GPU               []GPU                        `json:"gpu,omitempty"`
+	ExecutorProviders []string                     `json:"executor_providers,omitempty"`
+	Executors         []ExecutorRef                `json:"executors,omitempty"`
+	WorkloadKinds     []string                     `json:"workload_kinds,omitempty"`
+	ExecutionTiers    []ExecutionSecurityTier      `json:"execution_tiers,omitempty"`
+	ProofTiers        []ProofTier                  `json:"proof_tiers,omitempty"`
+	NetworkModes      []NetworkMode                `json:"network_modes,omitempty"`
+	CapabilityTags    []string                     `json:"capability_tags,omitempty"`
+	CapabilityReports []ProviderCapabilityReport   `json:"capability_reports,omitempty"`
+	HardwareSecurity  HardwareSecurityCapabilities `json:"hardware_security,omitzero"`
+}
+
+type Lease struct {
+	ID                 string            `json:"id"`
+	TaskID             string            `json:"task_id"`
+	WorkerID           string            `json:"worker_id"`
+	PoolID             string            `json:"pool_id"`
+	Executor           ExecutorRef       `json:"executor"`
+	CapabilitySnapshot Capabilities      `json:"capability_snapshot"`
+	AllowedPushTargets []string          `json:"allowed_push_targets,omitempty"`
+	AllowedPullTargets []string          `json:"allowed_pull_targets,omitempty"`
+	NetworkPolicy      NetworkPolicy     `json:"network_policy,omitzero"`
+	P2PSessionPolicy   *P2PSessionPolicy `json:"p2p_session_policy,omitempty"`
+	ResiduePolicy      ResiduePolicy     `json:"residue_policy,omitzero"`
+	LeasedAt           time.Time         `json:"leased_at"`
+	ExpiresAt          time.Time         `json:"expires_at"`
+}
+
+func (l Lease) Validate() error {
+	var errs []error
+	require := func(name, value string) {
+		if strings.TrimSpace(value) == "" {
+			errs = append(errs, fmt.Errorf("%s is required", name))
+		}
+	}
+	require("id", l.ID)
+	require("task_id", l.TaskID)
+	require("worker_id", l.WorkerID)
+	require("pool_id", l.PoolID)
+	require("executor.provider", l.Executor.Provider)
+	require("executor.version", l.Executor.Version)
+	if strings.TrimSpace(l.CapabilitySnapshot.OS) == "" {
+		errs = append(errs, errors.New("capability_snapshot.os is required"))
+	}
+	if strings.TrimSpace(l.CapabilitySnapshot.Arch) == "" {
+		errs = append(errs, errors.New("capability_snapshot.arch is required"))
+	}
+	if err := l.NetworkPolicy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("network_policy: %w", err))
+	}
+	if l.P2PSessionPolicy != nil {
+		if err := l.P2PSessionPolicy.Validate(time.Time{}); err != nil {
+			errs = append(errs, fmt.Errorf("p2p_session_policy: %w", err))
+		}
+	}
+	if err := l.ResiduePolicy.Validate(ResiduePolicyValidation{
+		RequireSessionKey:          true,
+		RequireExplicitWorkerBound: true,
+		RequirePolicyHash:          true,
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("residue_policy: %w", err))
+	}
+	if l.LeasedAt.IsZero() {
+		errs = append(errs, errors.New("leased_at is required"))
+	}
+	if l.ExpiresAt.IsZero() {
+		errs = append(errs, errors.New("expires_at is required"))
+	}
+	if !l.LeasedAt.IsZero() && !l.ExpiresAt.IsZero() && !l.ExpiresAt.After(l.LeasedAt) {
+		errs = append(errs, errors.New("expires_at must be after leased_at"))
 	}
 	return errors.Join(errs...)
 }
