@@ -22,6 +22,7 @@
 - workflow-compute alias/delegate changes.
 - product-capture import switch and BMW live usage docs.
 - lease acquisition, worker registration, agent updater, scheduler/admin/dashboard/settlement APIs.
+- reusable control-plane extraction or control-plane storage/scheduling/authz design.
 - staging deployment or local-agent registration changes.
 
 **PR Grouping:**
@@ -321,6 +322,9 @@ After this compute-core PR is merged and green:
    registered local agents.
 4. Tag the next compute-core release only after the compute-core PR is merged
    and CI is green; update downstream pins in the workflow-compute consumer PR.
+5. Plan reusable control-plane extraction as a later platform phase once the
+   public task/proof, product-capture, scenarios, staging rollout, and
+   reconnecting-agent phases have produced enough real-boundary evidence.
 
 ## Final PR Verification
 

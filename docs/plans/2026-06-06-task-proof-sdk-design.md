@@ -11,7 +11,8 @@ This is Phase 1 of the public distributed-compute platform roadmap. It removes
 the immediate private-protocol dependency blocker for `workflow-plugin-product-capture`
 while keeping `workflow-compute` as the managed product assembly that owns
 scheduling, task mutation, agent supervision, settlement, dashboards, and
-deployment policy.
+deployment policy until a later reusable control-plane component is designed and
+extracted.
 
 ## Global Design Guidance
 
@@ -21,7 +22,7 @@ Source: `README.md`
 |---|---|
 | Compute-core is the public Go module for compute protocol and provider catalog contracts. | Add wire contracts and client helpers to `protocol`, not app behavior. |
 | Workflow applications should treat declarations as portable provider-facing base contracts. | Define task/proof request and response shapes that external plugins can compile against. |
-| Application-specific scheduling, task state, settlement, dashboards, and worker supervision remain outside compute-core. | Do not add scheduler queues, admin APIs, dashboard models, worker registration, service leasing methods, or settlement helpers. |
+| Application-specific scheduling, task state, settlement, dashboards, and worker supervision remain outside compute-core. | Do not add scheduler queues, admin APIs, dashboard models, worker registration, service leasing methods, or settlement helpers here; future reusable control-plane extraction must be its own phase/component. |
 
 ## Approaches Considered
 
@@ -65,6 +66,12 @@ views.
 public protocol package to compute-core where the wire shape is identical.
 `workflow-plugin-product-capture` will then switch imports to compute-core in a
 later downstream phase and use the public client.
+
+Long-term, GoCodeAlone may extract a reusable control plane that other managed
+products can assemble. This SDK is intentionally narrower: it supplies the
+shared wire contract that such a control plane would also consume, without
+deciding that control plane's storage model, scheduling policy, deployment
+shape, authz chain, or operational UI.
 
 ## Security Review
 
@@ -147,5 +154,7 @@ previous known-good compute-core version until the replacement tag is verified.
   `workflow-compute` consumer PR verifies API compatibility.
 - Add lease acquisition, worker registration, and resilient agent upgrade APIs
   to the future public agent plugin phase, not this SDK.
+- Design reusable control-plane extraction as its own future platform phase,
+  not as an expansion of compute-core's protocol/client package.
 - Keep live staging refresh/local-agent registration evidence in the
   `workflow-compute` consumer phase where the server actually changes.
