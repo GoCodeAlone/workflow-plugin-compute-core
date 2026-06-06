@@ -3092,6 +3092,8 @@ func (p P2PSessionPolicy) Validate(now time.Time) error {
 		errs = append(errs, errors.New("policy_hash is required"))
 	} else if !validSHA256Digest(p.PolicyHash) {
 		errs = append(errs, errors.New("policy_hash must be sha256 digest"))
+	} else if p.PolicyHash != CanonicalHash(p.SigningPayload()) {
+		errs = append(errs, errors.New("policy_hash does not match signing payload"))
 	}
 	if err := validateSignatureEnvelope(p.Signature, "signature"); err != nil {
 		errs = append(errs, err)
@@ -3329,26 +3331,59 @@ type GPU struct {
 	MemoryBytes int64  `json:"memory_bytes,omitempty"`
 }
 
+type CapabilityReportStatus string
+
+const (
+	CapabilitySupported   CapabilityReportStatus = "supported"
+	CapabilityDegraded    CapabilityReportStatus = "degraded"
+	CapabilityUnsupported CapabilityReportStatus = "unsupported"
+)
+
+type CapabilityReport struct {
+	Provider    string                 `json:"provider"`
+	Backend     string                 `json:"backend,omitempty"`
+	Status      CapabilityReportStatus `json:"status"`
+	Reason      string                 `json:"reason,omitempty"`
+	Constraints []string               `json:"constraints,omitempty"`
+}
+
+type SigningCapability struct {
+	Provider       string `json:"provider"`
+	Algorithm      string `json:"algorithm"`
+	KeyID          string `json:"key_id,omitempty"`
+	HardwareBacked bool   `json:"hardware_backed,omitempty"`
+	Available      bool   `json:"available"`
+}
+
+type Security struct {
+	TPM                  bool                  `json:"tpm,omitempty"`
+	SecureEnclave        bool                  `json:"secure_enclave,omitempty"`
+	TEE                  []string              `json:"tee,omitempty"`
+	HardwareClasses      []string              `json:"hardware_classes,omitempty"`
+	HardwareAttestations []HardwareAttestation `json:"hardware_attestations,omitempty"`
+	Signing              []SigningCapability   `json:"signing,omitempty"`
+}
+
 type Capabilities struct {
-	MachineID         string                       `json:"machine_id,omitempty"`
-	OS                string                       `json:"os,omitempty"`
-	Arch              string                       `json:"arch,omitempty"`
-	CPUModel          string                       `json:"cpu_model,omitempty"`
-	CPUCount          int                          `json:"cpu_count,omitempty"`
-	MemoryBytes       int64                        `json:"memory_bytes,omitempty"`
-	DiskBytes         int64                        `json:"disk_bytes,omitempty"`
-	BandwidthMbps     int64                        `json:"bandwidth_mbps,omitempty"`
-	IngressCapable    bool                         `json:"ingress_capable,omitempty"`
-	GPU               []GPU                        `json:"gpu,omitempty"`
-	ExecutorProviders []string                     `json:"executor_providers,omitempty"`
-	Executors         []ExecutorRef                `json:"executors,omitempty"`
-	WorkloadKinds     []string                     `json:"workload_kinds,omitempty"`
-	ExecutionTiers    []ExecutionSecurityTier      `json:"execution_tiers,omitempty"`
-	ProofTiers        []ProofTier                  `json:"proof_tiers,omitempty"`
-	NetworkModes      []NetworkMode                `json:"network_modes,omitempty"`
-	CapabilityTags    []string                     `json:"capability_tags,omitempty"`
-	CapabilityReports []ProviderCapabilityReport   `json:"capability_reports,omitempty"`
-	HardwareSecurity  HardwareSecurityCapabilities `json:"hardware_security,omitzero"`
+	MachineID         string                  `json:"machine_id,omitempty"`
+	OS                string                  `json:"os,omitempty"`
+	Arch              string                  `json:"arch,omitempty"`
+	CPUModel          string                  `json:"cpu_model,omitempty"`
+	CPUCount          int                     `json:"cpu_count,omitempty"`
+	MemoryBytes       int64                   `json:"memory_bytes,omitempty"`
+	DiskBytes         int64                   `json:"disk_bytes,omitempty"`
+	BandwidthMbps     int64                   `json:"bandwidth_mbps,omitempty"`
+	IngressCapable    bool                    `json:"ingress_capable,omitempty"`
+	GPU               []GPU                   `json:"gpu,omitempty"`
+	ExecutorProviders []string                `json:"executor_providers,omitempty"`
+	Executors         []ExecutorRef           `json:"executors,omitempty"`
+	WorkloadKinds     []string                `json:"workload_kinds,omitempty"`
+	ExecutionTiers    []ExecutionSecurityTier `json:"execution_tiers,omitempty"`
+	ProofTiers        []ProofTier             `json:"proof_tiers,omitempty"`
+	NetworkModes      []NetworkMode           `json:"network_modes,omitempty"`
+	CapabilityTags    []string                `json:"capability_tags,omitempty"`
+	CapabilityReports []CapabilityReport      `json:"capability_reports,omitempty"`
+	HardwareSecurity  Security                `json:"hardware_security,omitzero"`
 }
 
 type Lease struct {
