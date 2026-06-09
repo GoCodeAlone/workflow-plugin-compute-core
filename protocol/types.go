@@ -753,6 +753,9 @@ func (r RuntimeBackendReport) Validate() error {
 	if r.InstallBurden != "" && !validRuntimeInstallBurden(r.InstallBurden) {
 		errs = append(errs, fmt.Errorf("install_burden %q is unsupported", r.InstallBurden))
 	}
+	errs = append(errs, validateRuntimeBackendPublicText("version", r.Version)...)
+	errs = append(errs, validateRuntimeBackendPublicText("os", r.OS)...)
+	errs = append(errs, validateRuntimeBackendPublicText("arch", r.Arch)...)
 	for idx, profile := range r.RuntimeProfiles {
 		if !validRuntimeProfile(profile) {
 			errs = append(errs, fmt.Errorf("runtime_profiles[%d] %q is unsupported", idx, profile))
@@ -767,6 +770,10 @@ func (r RuntimeBackendReport) Validate() error {
 		if err := executor.ValidateForProof(); err != nil {
 			errs = append(errs, fmt.Errorf("executors[%d]: %w", idx, err))
 		}
+		if err := validateRuntimeBackendExecutor(executor); err != nil {
+			errs = append(errs, fmt.Errorf("executors[%d]: %w", idx, err))
+		}
+		errs = append(errs, validateRuntimeBackendPublicText(fmt.Sprintf("executors[%d].version", idx), executor.Version)...)
 	}
 	for idx, profile := range r.ConformanceProfiles {
 		if err := validateIdentifier(fmt.Sprintf("conformance_profiles[%d]", idx), profile); err != nil {
@@ -825,7 +832,7 @@ func (r RuntimeBackendReport) Validate() error {
 func RuntimeBackendReportsSupportedExecutors(reports []RuntimeBackendReport) []ExecutorRef {
 	var executors []ExecutorRef
 	for _, report := range reports {
-		if report.Status != RuntimeBackendSupported {
+		if report.Status != RuntimeBackendSupported || report.Validate() != nil {
 			continue
 		}
 		executors = append(executors, report.Executors...)
@@ -837,7 +844,7 @@ func ProviderCapabilityReportsFromRuntimeBackends(reports []RuntimeBackendReport
 	var capabilities []ProviderCapabilityReport
 	seen := map[string]struct{}{}
 	for _, report := range reports {
-		if report.Status != RuntimeBackendSupported {
+		if report.Status != RuntimeBackendSupported || report.Validate() != nil {
 			continue
 		}
 		for _, provider := range report.ExecutorProviders {
@@ -5519,6 +5526,28 @@ func validateRuntimeBackendEvidence(evidence RuntimeBackendEvidence) []error {
 		errs = append(errs, validateRuntimeBackendPublicText(fmt.Sprintf("evidence.details[%d]", idx), detail)...)
 	}
 	return errs
+}
+
+func validateRuntimeBackendExecutor(executor ExecutorRef) error {
+	var errs []error
+	if err := validateIdentifier("executor.provider", executor.Provider); err != nil {
+		errs = append(errs, err)
+	}
+	if executor.ExecutionSecurityTier != "" && !validExecutionSecurityTier(executor.ExecutionSecurityTier) {
+		errs = append(errs, fmt.Errorf("executor.execution_security_tier %q is unsupported", executor.ExecutionSecurityTier))
+	}
+	if executor.ProofTier != "" && !validProofTier(executor.ProofTier) {
+		errs = append(errs, fmt.Errorf("executor.proof_tier %q is unsupported", executor.ProofTier))
+	}
+	if executor.ExecutionSecurityTier != "" && executor.ExecutionSecurityTier != ExecutionTrustedNative && executor.ExecutionSecurityTier != ExecutionWASMCapability {
+		if executor.ImageDigest != "" && !validSHA256Ref(executor.ImageDigest) {
+			errs = append(errs, errors.New("executor.image_digest must be sha256:<64 hex chars>"))
+		}
+		if executor.RootFSDigest != "" && !validSHA256Ref(executor.RootFSDigest) {
+			errs = append(errs, errors.New("executor.rootfs_digest must be sha256:<64 hex chars>"))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func validateRuntimeBackendPublicText(field, value string) []error {

@@ -1015,6 +1015,68 @@ func TestRuntimeBackendReportsSupportedExecutors(t *testing.T) {
 	}
 }
 
+func TestRuntimeBackendHelpersIgnoreInvalidSupportedReports(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.GeneratedAt = time.Time{}
+	report.Evidence.Digest = ""
+
+	if got := protocol.RuntimeBackendReportsSupportedExecutors([]protocol.RuntimeBackendReport{report}); len(got) != 0 {
+		t.Fatalf("invalid supported report produced executors: %+v", got)
+	}
+	if got := protocol.ProviderCapabilityReportsFromRuntimeBackends([]protocol.RuntimeBackendReport{report}); len(got) != 0 {
+		t.Fatalf("invalid supported report produced capability reports: %+v", got)
+	}
+}
+
+func TestRuntimeBackendReportRejectsInvalidExecutorProofMetadata(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.Executors[0].Provider = "bad provider"
+	report.Executors[0].ExecutionSecurityTier = protocol.ExecutionSecurityTier("root-host")
+	report.Executors[0].ProofTier = protocol.ProofTier("trust-me")
+	report.Executors[0].ImageDigest = "not-a-digest"
+	report.Executors[0].RootFSDigest = "also-not-a-digest"
+
+	err := report.Validate()
+	if err == nil {
+		t.Fatal("expected invalid executor proof metadata to fail")
+	}
+	for _, want := range []string{
+		"executor.provider",
+		"executor.execution_security_tier",
+		"executor.proof_tier",
+		"executor.image_digest",
+		"executor.rootfs_digest",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected runtime backend error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestRuntimeBackendReportRejectsUnsafePublicStrings(t *testing.T) {
+	for field, mutate := range map[string]func(*protocol.RuntimeBackendReport){
+		"version": func(report *protocol.RuntimeBackendReport) {
+			report.Version = "engine token output"
+		},
+		"os": func(report *protocol.RuntimeBackendReport) {
+			report.OS = "/home/example"
+		},
+		"arch": func(report *protocol.RuntimeBackendReport) {
+			report.Arch = "amd64\nextra"
+		},
+		"executors[0].version": func(report *protocol.RuntimeBackendReport) {
+			report.Executors[0].Version = "runtime docker.sock"
+		},
+	} {
+		report := validRuntimeBackendReport()
+		mutate(&report)
+		err := report.Validate()
+		if err == nil || !strings.Contains(err.Error(), field) {
+			t.Fatalf("expected unsafe %s to fail, got %v", field, err)
+		}
+	}
+}
+
 func validRuntimeBackendReport() protocol.RuntimeBackendReport {
 	return protocol.RuntimeBackendReport{
 		ProtocolVersion: protocol.Version,
