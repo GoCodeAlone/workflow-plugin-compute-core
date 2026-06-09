@@ -868,6 +868,199 @@ func TestValidatePlacementRequirementsAgainstCapabilities(t *testing.T) {
 	}
 }
 
+func TestRuntimeBackendReportValidatesSupportedEvidence(t *testing.T) {
+	report := validRuntimeBackendReport()
+	if err := report.Validate(); err != nil {
+		t.Fatalf("runtime backend report invalid: %v", err)
+	}
+}
+
+func TestRuntimeBackendReportRejectsMissingRequiredFields(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.BackendID = ""
+	report.Family = ""
+	report.Status = ""
+	report.IsolationMode = ""
+	report.GeneratedAt = time.Time{}
+
+	err := report.Validate()
+	if err == nil {
+		t.Fatal("expected missing runtime backend fields to fail")
+	}
+	for _, want := range []string{"backend_id", "family", "status", "isolation_mode", "generated_at"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected runtime backend error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestRuntimeBackendReportRejectsIncompleteSupportedEvidence(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.ExecutorProviders = nil
+	report.RuntimeProfiles = nil
+	report.ConformanceProfiles = nil
+	report.Evidence.Workspace = false
+	report.Evidence.Network = false
+	report.Evidence.Env = false
+	report.Evidence.Proof = false
+	report.Evidence.Cleanup = false
+	report.Evidence.Digest = "sha256:not-hex"
+
+	err := report.Validate()
+	if err == nil {
+		t.Fatal("expected incomplete supported runtime backend evidence to fail")
+	}
+	for _, want := range []string{
+		"executor_providers",
+		"runtime_profiles",
+		"conformance_profiles",
+		"evidence.workspace",
+		"evidence.network",
+		"evidence.env",
+		"evidence.proof",
+		"evidence.cleanup",
+		"evidence.digest",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected runtime backend error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestRuntimeBackendReportRejectsNonSupportedExecutors(t *testing.T) {
+	for _, status := range []protocol.RuntimeBackendStatus{
+		protocol.RuntimeBackendDegraded,
+		protocol.RuntimeBackendUnsupported,
+	} {
+		report := validRuntimeBackendReport()
+		report.Status = status
+		report.Reason = ""
+
+		err := report.Validate()
+		if err == nil {
+			t.Fatalf("expected %s runtime backend with executors to fail", status)
+		}
+		for _, want := range []string{"reason", "executor_providers", "executors"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected %s runtime backend error to contain %q, got %v", status, want, err)
+			}
+		}
+
+		report.ExecutorProviders = nil
+		report.Executors = nil
+		report.Reason = "runtime unavailable"
+		if err := report.Validate(); err != nil {
+			t.Fatalf("%s runtime backend without executors rejected: %v", status, err)
+		}
+	}
+}
+
+func TestRuntimeBackendReportRejectsUnsafeEvidenceDetails(t *testing.T) {
+	for _, detail := range []string{
+		"/home/example/.config/runtime",
+		"runtime socket docker.sock",
+		"credential token was set",
+		"registry secret value",
+		"session cookie present",
+	} {
+		report := validRuntimeBackendReport()
+		report.Evidence.Details = []string{detail}
+		if err := report.Validate(); err == nil {
+			t.Fatalf("runtime backend accepted unsafe detail %q", detail)
+		}
+	}
+}
+
+func TestProviderCapabilityReportsFromRuntimeBackends(t *testing.T) {
+	supported := validRuntimeBackendReport()
+	degraded := supported
+	degraded.BackendID = "podman-degraded"
+	degraded.Status = protocol.RuntimeBackendDegraded
+	degraded.Reason = "runtime unavailable"
+	degraded.ExecutorProviders = nil
+	degraded.Executors = nil
+
+	reports := protocol.ProviderCapabilityReportsFromRuntimeBackends([]protocol.RuntimeBackendReport{supported, degraded})
+
+	if len(reports) != 2 {
+		t.Fatalf("capability reports = %d, want 2: %+v", len(reports), reports)
+	}
+	for _, report := range reports {
+		if report.Status != protocol.ProviderCapabilitySupported {
+			t.Fatalf("capability report status = %q, want supported", report.Status)
+		}
+	}
+	if !slices.ContainsFunc(reports, func(report protocol.ProviderCapabilityReport) bool {
+		return report.Provider == "sandboxed-command"
+	}) || !slices.ContainsFunc(reports, func(report protocol.ProviderCapabilityReport) bool {
+		return report.Provider == "sandboxed-container-build"
+	}) {
+		t.Fatalf("capability reports missing expected providers: %+v", reports)
+	}
+}
+
+func TestRuntimeBackendReportsSupportedExecutors(t *testing.T) {
+	report := validRuntimeBackendReport()
+	executors := protocol.RuntimeBackendReportsSupportedExecutors([]protocol.RuntimeBackendReport{report})
+	if len(executors) != 2 {
+		t.Fatalf("supported executors = %d, want 2: %+v", len(executors), executors)
+	}
+	for _, executor := range executors {
+		if executor.ExecutionSecurityTier != protocol.ExecutionSandboxedContainer ||
+			executor.ProofTier != protocol.ProofArtifactHash ||
+			executor.ImageDigest == "" ||
+			executor.RootFSDigest == "" {
+			t.Fatalf("executor omitted runtime proof metadata: %+v", executor)
+		}
+	}
+}
+
+func validRuntimeBackendReport() protocol.RuntimeBackendReport {
+	return protocol.RuntimeBackendReport{
+		ProtocolVersion: protocol.Version,
+		BackendID:       "podman-rootless",
+		Family:          protocol.RuntimeBackendFamilyPodman,
+		Tool:            protocol.ContainerRuntimePodman,
+		Version:         "v5.0.0",
+		OS:              "linux",
+		Arch:            "amd64",
+		Status:          protocol.RuntimeBackendSupported,
+		IsolationMode:   protocol.RuntimeIsolationUserNamespace,
+		InstallBurden:   protocol.RuntimeInstallSystemInstalled,
+		RuntimeProfiles: []protocol.RuntimeProfile{
+			protocol.RuntimeProfileSandboxedOCI,
+			protocol.RuntimeProfileContainerBuild,
+		},
+		ExecutorProviders: []string{"sandboxed-command", "sandboxed-container-build"},
+		Executors: []protocol.ExecutorRef{{
+			Provider:              "sandboxed-command",
+			Version:               "v1.2.3",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+			ImageDigest:           "sha256:" + strings.Repeat("a", 64),
+			RootFSDigest:          "sha256:" + strings.Repeat("b", 64),
+		}, {
+			Provider:              "sandboxed-container-build",
+			Version:               "v1.2.3",
+			ExecutionSecurityTier: protocol.ExecutionSandboxedContainer,
+			ProofTier:             protocol.ProofArtifactHash,
+			ImageDigest:           "sha256:" + strings.Repeat("c", 64),
+			RootFSDigest:          "sha256:" + strings.Repeat("d", 64),
+		}},
+		ConformanceProfiles: []string{"workspace-network-env-proof-cleanup"},
+		Evidence: protocol.RuntimeBackendEvidence{
+			Digest:    "sha256:" + strings.Repeat("e", 64),
+			Workspace: true,
+			Network:   true,
+			Env:       true,
+			Proof:     true,
+			Cleanup:   true,
+			Details:   []string{"distroless-static-conformance"},
+		},
+		GeneratedAt: time.Unix(1_700_000_000, 0).UTC(),
+	}
+}
+
 func TestRequiredHardwareClass(t *testing.T) {
 	for name, tc := range map[string]struct {
 		req  protocol.PlacementRequirements

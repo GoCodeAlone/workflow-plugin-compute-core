@@ -18,8 +18,11 @@ validates.
 The public contract includes task/proof/lease wire shapes, provider identity,
 org/pool scoping, access visibility, supported workload and network modes,
 runtime profiles, operation schemas, artifact declarations, residue policy, and
-upstream client conformance evidence. Workflow applications should treat these
-declarations as the portable provider-facing base contract.
+upstream client conformance evidence. Runtime plugins can also report concrete
+execution backends through `protocol.RuntimeBackendReport`; control planes can
+derive supported executor providers and provider capability reports from those
+backend reports. Workflow applications should treat these declarations as the
+portable provider-facing base contract.
 
 The task/proof client covers submission and read-only observation:
 
@@ -36,6 +39,72 @@ control-plane component later, but they are not implemented by compute-core.
 
 This plugin intentionally advertises no module, step, trigger, or IaC runtime
 capabilities.
+
+## Runtime Backend Reports
+
+`RuntimeBackendReport` is JSON protocol metadata for dependency-light agent
+runtime discovery. A backend can only claim `supported` after it supplies
+executor providers, runtime profiles, conformance profiles, evidence for
+workspace/network/env/proof/cleanup behavior, and a `sha256:` evidence digest.
+Degraded or unsupported backends must explain why and must not advertise usable
+executors.
+
+Supported rootless/container-style report:
+
+```json
+{
+  "protocol_version": "compute.v1alpha1",
+  "backend_id": "podman-rootless",
+  "family": "podman",
+  "tool": "podman",
+  "version": "v5.0.0",
+  "os": "linux",
+  "arch": "amd64",
+  "status": "supported",
+  "isolation_mode": "user-namespace",
+  "install_burden": "system-installed",
+  "runtime_profiles": ["sandboxed-oci-v1", "container-build-v1"],
+  "executor_providers": ["sandboxed-command", "sandboxed-container-build"],
+  "executors": [
+    {
+      "provider": "sandboxed-command",
+      "version": "v1.2.3",
+      "execution_security_tier": "sandboxed-container",
+      "proof_tier": "artifact-hash",
+      "image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rootfs_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "conformance_profiles": ["workspace-network-env-proof-cleanup"],
+  "evidence": {
+    "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "workspace": true,
+    "network": true,
+    "env": true,
+    "proof": true,
+    "cleanup": true,
+    "details": ["distroless-static-conformance"]
+  },
+  "generated_at": "2026-06-09T00:00:00Z"
+}
+```
+
+Degraded Windows Hyper-V/WSL candidate:
+
+```json
+{
+  "protocol_version": "compute.v1alpha1",
+  "backend_id": "windows-hyper-v-candidate",
+  "family": "hyper-v",
+  "os": "windows",
+  "arch": "amd64",
+  "status": "degraded",
+  "reason": "runtime candidate detected but conformance has not completed",
+  "isolation_mode": "vm-backed-container",
+  "install_burden": "wsl-hyper-v",
+  "generated_at": "2026-06-09T00:00:00Z"
+}
+```
 
 ## Build & Test
 

@@ -650,6 +650,220 @@ type ProviderCapabilityReport struct {
 	Reason   string                   `json:"reason,omitempty"`
 }
 
+type RuntimeBackendStatus string
+
+const (
+	RuntimeBackendSupported   RuntimeBackendStatus = "supported"
+	RuntimeBackendDegraded    RuntimeBackendStatus = "degraded"
+	RuntimeBackendUnsupported RuntimeBackendStatus = "unsupported"
+)
+
+type RuntimeBackendFamily string
+
+const (
+	RuntimeBackendFamilyPodman         RuntimeBackendFamily = "podman"
+	RuntimeBackendFamilyDocker         RuntimeBackendFamily = "docker"
+	RuntimeBackendFamilyNerdctl        RuntimeBackendFamily = "nerdctl"
+	RuntimeBackendFamilyContainerd     RuntimeBackendFamily = "containerd"
+	RuntimeBackendFamilyAppleContainer RuntimeBackendFamily = "apple-container"
+	RuntimeBackendFamilyHyperV         RuntimeBackendFamily = "hyper-v"
+	RuntimeBackendFamilyWSL            RuntimeBackendFamily = "wsl"
+)
+
+type RuntimeIsolationMode string
+
+const (
+	RuntimeIsolationSharedKernelContainer RuntimeIsolationMode = "shared-kernel-container"
+	RuntimeIsolationUserNamespace         RuntimeIsolationMode = "user-namespace"
+	RuntimeIsolationVMBackedContainer     RuntimeIsolationMode = "vm-backed-container"
+	RuntimeIsolationMicroVM               RuntimeIsolationMode = "microvm"
+	RuntimeIsolationConfidentialRuntime   RuntimeIsolationMode = "confidential-runtime"
+)
+
+type RuntimeInstallBurden string
+
+const (
+	RuntimeInstallBundled         RuntimeInstallBurden = "bundled"
+	RuntimeInstallSystemInstalled RuntimeInstallBurden = "system-installed"
+	RuntimeInstallDesktopManaged  RuntimeInstallBurden = "desktop-managed"
+	RuntimeInstallWSLHyperV       RuntimeInstallBurden = "wsl-hyper-v"
+	RuntimeInstallUnsupported     RuntimeInstallBurden = "unsupported"
+)
+
+type RuntimeBackendEvidence struct {
+	Digest    string   `json:"digest,omitempty"`
+	Workspace bool     `json:"workspace,omitempty"`
+	Network   bool     `json:"network,omitempty"`
+	Env       bool     `json:"env,omitempty"`
+	Proof     bool     `json:"proof,omitempty"`
+	Cleanup   bool     `json:"cleanup,omitempty"`
+	Details   []string `json:"details,omitempty"`
+}
+
+type RuntimeBackendReport struct {
+	ProtocolVersion     string                 `json:"protocol_version,omitempty"`
+	BackendID           string                 `json:"backend_id"`
+	Family              RuntimeBackendFamily   `json:"family"`
+	Tool                ContainerRuntimeTool   `json:"tool,omitempty"`
+	Version             string                 `json:"version,omitempty"`
+	OS                  string                 `json:"os,omitempty"`
+	Arch                string                 `json:"arch,omitempty"`
+	Status              RuntimeBackendStatus   `json:"status"`
+	Reason              string                 `json:"reason,omitempty"`
+	IsolationMode       RuntimeIsolationMode   `json:"isolation_mode"`
+	InstallBurden       RuntimeInstallBurden   `json:"install_burden,omitempty"`
+	RuntimeProfiles     []RuntimeProfile       `json:"runtime_profiles,omitempty"`
+	ExecutorProviders   []string               `json:"executor_providers,omitempty"`
+	Executors           []ExecutorRef          `json:"executors,omitempty"`
+	ConformanceProfiles []string               `json:"conformance_profiles,omitempty"`
+	Evidence            RuntimeBackendEvidence `json:"evidence,omitzero"`
+	GeneratedAt         time.Time              `json:"generated_at,omitzero"`
+	Constraints         []string               `json:"constraints,omitempty"`
+}
+
+func (r RuntimeBackendReport) Validate() error {
+	var errs []error
+	if err := validateIdentifier("backend_id", r.BackendID); err != nil {
+		errs = append(errs, err)
+	}
+	if r.Family == "" {
+		errs = append(errs, errors.New("family is required"))
+	} else if !validRuntimeBackendFamily(r.Family) {
+		errs = append(errs, fmt.Errorf("family %q is unsupported", r.Family))
+	}
+	if r.Status == "" {
+		errs = append(errs, errors.New("status is required"))
+	} else if !validRuntimeBackendStatus(r.Status) {
+		errs = append(errs, fmt.Errorf("status %q is unsupported", r.Status))
+	}
+	if r.IsolationMode == "" {
+		errs = append(errs, errors.New("isolation_mode is required"))
+	} else if !validRuntimeIsolationMode(r.IsolationMode) {
+		errs = append(errs, fmt.Errorf("isolation_mode %q is unsupported", r.IsolationMode))
+	}
+	if r.GeneratedAt.IsZero() {
+		errs = append(errs, errors.New("generated_at is required"))
+	}
+	if r.ProtocolVersion != "" && r.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if r.Tool != "" && !validContainerRuntimeTool(r.Tool) {
+		errs = append(errs, fmt.Errorf("tool %q is unsupported", r.Tool))
+	}
+	if r.InstallBurden != "" && !validRuntimeInstallBurden(r.InstallBurden) {
+		errs = append(errs, fmt.Errorf("install_burden %q is unsupported", r.InstallBurden))
+	}
+	for idx, profile := range r.RuntimeProfiles {
+		if !validRuntimeProfile(profile) {
+			errs = append(errs, fmt.Errorf("runtime_profiles[%d] %q is unsupported", idx, profile))
+		}
+	}
+	for idx, provider := range r.ExecutorProviders {
+		if err := validateIdentifier(fmt.Sprintf("executor_providers[%d]", idx), provider); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for idx, executor := range r.Executors {
+		if err := executor.ValidateForProof(); err != nil {
+			errs = append(errs, fmt.Errorf("executors[%d]: %w", idx, err))
+		}
+	}
+	for idx, profile := range r.ConformanceProfiles {
+		if err := validateIdentifier(fmt.Sprintf("conformance_profiles[%d]", idx), profile); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	errs = append(errs, validateRuntimeBackendEvidence(r.Evidence)...)
+	errs = append(errs, validateRuntimeBackendPublicText("reason", r.Reason)...)
+	for idx, constraint := range r.Constraints {
+		errs = append(errs, validateRuntimeBackendPublicText(fmt.Sprintf("constraints[%d]", idx), constraint)...)
+	}
+
+	switch r.Status {
+	case RuntimeBackendSupported:
+		if len(r.ExecutorProviders) == 0 {
+			errs = append(errs, errors.New("executor_providers are required for supported runtime backend"))
+		}
+		if len(r.RuntimeProfiles) == 0 {
+			errs = append(errs, errors.New("runtime_profiles are required for supported runtime backend"))
+		}
+		if len(r.ConformanceProfiles) == 0 {
+			errs = append(errs, errors.New("conformance_profiles are required for supported runtime backend"))
+		}
+		if r.Evidence.Digest == "" || !validSHA256Digest(r.Evidence.Digest) {
+			errs = append(errs, errors.New("evidence.digest must be sha256:<64 lowercase hex chars>"))
+		}
+		if !r.Evidence.Workspace {
+			errs = append(errs, errors.New("evidence.workspace is required for supported runtime backend"))
+		}
+		if !r.Evidence.Network {
+			errs = append(errs, errors.New("evidence.network is required for supported runtime backend"))
+		}
+		if !r.Evidence.Env {
+			errs = append(errs, errors.New("evidence.env is required for supported runtime backend"))
+		}
+		if !r.Evidence.Proof {
+			errs = append(errs, errors.New("evidence.proof is required for supported runtime backend"))
+		}
+		if !r.Evidence.Cleanup {
+			errs = append(errs, errors.New("evidence.cleanup is required for supported runtime backend"))
+		}
+	case RuntimeBackendDegraded, RuntimeBackendUnsupported:
+		if strings.TrimSpace(r.Reason) == "" {
+			errs = append(errs, errors.New("reason is required for degraded or unsupported runtime backend"))
+		}
+		if len(r.ExecutorProviders) != 0 {
+			errs = append(errs, errors.New("executor_providers must be empty unless runtime backend is supported"))
+		}
+		if len(r.Executors) != 0 {
+			errs = append(errs, errors.New("executors must be empty unless runtime backend is supported"))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func RuntimeBackendReportsSupportedExecutors(reports []RuntimeBackendReport) []ExecutorRef {
+	var executors []ExecutorRef
+	for _, report := range reports {
+		if report.Status != RuntimeBackendSupported {
+			continue
+		}
+		executors = append(executors, report.Executors...)
+	}
+	return executors
+}
+
+func ProviderCapabilityReportsFromRuntimeBackends(reports []RuntimeBackendReport) []ProviderCapabilityReport {
+	var capabilities []ProviderCapabilityReport
+	seen := map[string]struct{}{}
+	for _, report := range reports {
+		if report.Status != RuntimeBackendSupported {
+			continue
+		}
+		for _, provider := range report.ExecutorProviders {
+			if _, ok := seen[provider]; ok {
+				continue
+			}
+			seen[provider] = struct{}{}
+			capabilities = append(capabilities, ProviderCapabilityReport{
+				Provider: provider,
+				Status:   ProviderCapabilitySupported,
+			})
+		}
+		for _, executor := range report.Executors {
+			if _, ok := seen[executor.Provider]; ok {
+				continue
+			}
+			seen[executor.Provider] = struct{}{}
+			capabilities = append(capabilities, ProviderCapabilityReport{
+				Provider: executor.Provider,
+				Status:   ProviderCapabilitySupported,
+			})
+		}
+	}
+	return capabilities
+}
+
 type HardwareAttestation struct {
 	Class      string    `json:"class"`
 	Provider   string    `json:"provider"`
@@ -5247,6 +5461,94 @@ func validContainerRuntimeTool(tool ContainerRuntimeTool) bool {
 	default:
 		return false
 	}
+}
+
+func validRuntimeBackendStatus(status RuntimeBackendStatus) bool {
+	switch status {
+	case RuntimeBackendSupported, RuntimeBackendDegraded, RuntimeBackendUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimeBackendFamily(family RuntimeBackendFamily) bool {
+	switch family {
+	case RuntimeBackendFamilyPodman,
+		RuntimeBackendFamilyDocker,
+		RuntimeBackendFamilyNerdctl,
+		RuntimeBackendFamilyContainerd,
+		RuntimeBackendFamilyAppleContainer,
+		RuntimeBackendFamilyHyperV,
+		RuntimeBackendFamilyWSL:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimeIsolationMode(mode RuntimeIsolationMode) bool {
+	switch mode {
+	case RuntimeIsolationSharedKernelContainer,
+		RuntimeIsolationUserNamespace,
+		RuntimeIsolationVMBackedContainer,
+		RuntimeIsolationMicroVM,
+		RuntimeIsolationConfidentialRuntime:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRuntimeInstallBurden(burden RuntimeInstallBurden) bool {
+	switch burden {
+	case RuntimeInstallBundled,
+		RuntimeInstallSystemInstalled,
+		RuntimeInstallDesktopManaged,
+		RuntimeInstallWSLHyperV,
+		RuntimeInstallUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateRuntimeBackendEvidence(evidence RuntimeBackendEvidence) []error {
+	var errs []error
+	for idx, detail := range evidence.Details {
+		errs = append(errs, validateRuntimeBackendPublicText(fmt.Sprintf("evidence.details[%d]", idx), detail)...)
+	}
+	return errs
+}
+
+func validateRuntimeBackendPublicText(field, value string) []error {
+	if value == "" {
+		return nil
+	}
+	lower := strings.ToLower(value)
+	var errs []error
+	for _, marker := range []string{
+		"/users/",
+		"/home/",
+		"\\users\\",
+		".sock",
+		"token",
+		"cookie",
+		"secret",
+		"password",
+		"credential",
+		"authorization",
+		"bearer",
+	} {
+		if strings.Contains(lower, marker) {
+			errs = append(errs, fmt.Errorf("%s contains non-shippable runtime evidence", field))
+			break
+		}
+	}
+	if strings.ContainsAny(value, "\x00\r\n") {
+		errs = append(errs, fmt.Errorf("%s must be single-line text", field))
+	}
+	return errs
 }
 
 func validRuntimePermission(permission RuntimePermission) bool {
