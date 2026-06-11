@@ -29,12 +29,16 @@ func TestNetworkAuditStaticMessageContractMetadata(t *testing.T) {
 			ProtocolVersion string   `json:"protocolVersion"`
 		} `json:"contracts"`
 		ProtocolTypes []struct {
-			Name            string   `json:"name"`
-			Wire            string   `json:"wire"`
-			GoType          string   `json:"goType"`
-			ProtocolVersion string   `json:"protocolVersion"`
-			StatusValues    []string `json:"statusValues"`
-			Produces        []string `json:"produces"`
+			Name                                  string   `json:"name"`
+			Wire                                  string   `json:"wire"`
+			GoType                                string   `json:"goType"`
+			ProtocolVersion                       string   `json:"protocolVersion"`
+			StatusValues                          []string `json:"statusValues"`
+			Produces                              []string `json:"produces"`
+			ManagedRuntimeBundleField             string   `json:"managedRuntimeBundleField"`
+			SupportedBundledRuntimeRequiresBundle bool     `json:"supportedBundledRuntimeRequiresBundle"`
+			Requires                              []string `json:"requires"`
+			InstallBurden                         string   `json:"installBurden"`
 		} `json:"protocolTypes"`
 	}
 	if err := json.Unmarshal(data, &contracts); err != nil {
@@ -108,9 +112,74 @@ func TestNetworkAuditStaticMessageContractMetadata(t *testing.T) {
 				t.Fatalf("RuntimeBackendReport produces missing %q: %#v", want, typ.Produces)
 			}
 		}
+		if typ.ManagedRuntimeBundleField != "bundle" {
+			t.Fatalf("RuntimeBackendReport managedRuntimeBundleField = %q", typ.ManagedRuntimeBundleField)
+		}
+		if !typ.SupportedBundledRuntimeRequiresBundle {
+			t.Fatal("RuntimeBackendReport must require bundle evidence for supported bundled runtimes")
+		}
 	}
 	if !foundRuntimeBackend {
 		t.Fatal("RuntimeBackendReport protocol type not found")
+	}
+	var foundManagedBundle bool
+	for _, typ := range contracts.ProtocolTypes {
+		if typ.Name != "ManagedRuntimeBundleDescriptor" {
+			continue
+		}
+		foundManagedBundle = true
+		if typ.Wire != "json" {
+			t.Fatalf("ManagedRuntimeBundleDescriptor wire = %q", typ.Wire)
+		}
+		if typ.GoType != "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol.ManagedRuntimeBundleDescriptor" {
+			t.Fatalf("ManagedRuntimeBundleDescriptor goType = %q", typ.GoType)
+		}
+		if typ.ProtocolVersion != protocol.Version {
+			t.Fatalf("ManagedRuntimeBundleDescriptor protocolVersion = %q", typ.ProtocolVersion)
+		}
+		if typ.InstallBurden != "bundled" {
+			t.Fatalf("ManagedRuntimeBundleDescriptor installBurden = %q", typ.InstallBurden)
+		}
+		wantRequires := []string{
+			"bundle_id",
+			"family",
+			"version",
+			"os",
+			"arch",
+			"artifact_name",
+			"artifact_digest",
+			"checksum_name",
+			"checksum_digest",
+			"signature_name",
+			"signature_digest",
+			"signature_issuer",
+			"signature_key_id",
+			"trust_root_digest",
+			"signature_subject",
+			"valid_until",
+			"update_policy",
+			"cve_policy",
+			"scoped_store",
+			"supported_targets",
+			"conformance_profile",
+			"install_burden",
+		}
+		if len(typ.Requires) != len(wantRequires) {
+			t.Fatalf("ManagedRuntimeBundleDescriptor requires length = %d, want %d: %#v", len(typ.Requires), len(wantRequires), typ.Requires)
+		}
+		for _, want := range wantRequires {
+			if !slices.Contains(typ.Requires, want) {
+				t.Fatalf("ManagedRuntimeBundleDescriptor requires missing %q: %#v", want, typ.Requires)
+			}
+		}
+		for _, got := range typ.Requires {
+			if !slices.Contains(wantRequires, got) {
+				t.Fatalf("ManagedRuntimeBundleDescriptor requires unexpected %q: %#v", got, typ.Requires)
+			}
+		}
+	}
+	if !foundManagedBundle {
+		t.Fatal("ManagedRuntimeBundleDescriptor protocol type not found")
 	}
 }
 

@@ -24,6 +24,14 @@ derive supported executor providers and provider capability reports from those
 backend reports. Workflow applications should treat these declarations as the
 portable provider-facing base contract.
 
+Managed runtime bundles use `protocol.ManagedRuntimeBundleDescriptor`. The
+descriptor is only contract metadata: artifact signing, download, installation,
+doctor, and real conformance execution belong in runtime plugins such as
+`workflow-plugin-compute-container`. A `RuntimeBackendReport` with
+`install_burden: "bundled"` can only validate as `supported` when it includes a
+valid signed, updateable, scoped bundle descriptor. Degraded or unsupported
+reports may omit the bundle and must continue to avoid executor advertisements.
+
 The task/proof client covers submission and read-only observation:
 
 - `SubmitTask`
@@ -103,6 +111,100 @@ Degraded Windows Hyper-V/WSL candidate:
   "isolation_mode": "vm-backed-container",
   "install_burden": "wsl-hyper-v",
   "generated_at": "2026-06-09T00:00:00Z"
+}
+```
+
+Bundled managed containerd/nerdctl report:
+
+```json
+{
+  "protocol_version": "compute.v1alpha1",
+  "backend_id": "managed-containerd-linux-amd64",
+  "family": "containerd",
+  "tool": "nerdctl",
+  "version": "v1.2.3",
+  "os": "linux",
+  "arch": "amd64",
+  "status": "supported",
+  "isolation_mode": "user-namespace",
+  "install_burden": "bundled",
+  "runtime_profiles": ["sandboxed-oci-v1", "container-build-v1"],
+  "executor_providers": ["sandboxed-command"],
+  "executors": [
+    {
+      "provider": "sandboxed-command",
+      "version": "v1.2.3",
+      "execution_security_tier": "sandboxed-container",
+      "proof_tier": "artifact-hash",
+      "image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rootfs_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "conformance_profiles": ["workspace-network-env-proof-cleanup"],
+  "bundle": {
+    "protocol_version": "compute.v1alpha1",
+    "bundle_id": "managed-containerd-linux-amd64",
+    "family": "containerd",
+    "tool": "nerdctl",
+    "version": "v1.2.3",
+    "os": "linux",
+    "arch": "amd64",
+    "artifact_name": "managed-containerd-linux-amd64.tar.zst",
+    "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "checksum_name": "managed-containerd-linux-amd64.sha256",
+    "checksum_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "signature_name": "managed-containerd-linux-amd64.sig",
+    "signature_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "signature_issuer": "workflow-plugin-compute-container-release",
+    "signature_key_id": "workflow-compute-container-stable",
+    "trust_root_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "signature_subject": {
+      "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "runtime_family": "containerd",
+      "os": "linux",
+      "arch": "amd64",
+      "version": "v1.2.3",
+      "channel": "stable",
+      "conformance_profile": "workspace-network-env-proof-cleanup",
+      "scoped_store_policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    "valid_until": "2100-01-01T00:00:00Z",
+    "update_policy": {
+      "channel": "stable",
+      "min_supported_version": "v1.2.0"
+    },
+    "cve_policy": {
+      "policy_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "blocked_versions": ["v1.1.0"],
+      "revoked_key_ids": ["old-workflow-compute-container-stable"],
+      "updated_by_version": "v1.2.3"
+    },
+    "scoped_store": {
+      "required": true,
+      "namespace_strategy": "opaque-worker-pool-scope",
+      "store_strategy": "workflow-owned-content-store",
+      "policy_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "cleanup_required": true,
+      "host_global_visibility_forbidden": true
+    },
+    "supported_targets": [
+      {
+        "os": "linux",
+        "arch": "amd64"
+      }
+    ],
+    "conformance_profile": "workspace-network-env-proof-cleanup",
+    "install_burden": "bundled"
+  },
+  "evidence": {
+    "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "workspace": true,
+    "network": true,
+    "env": true,
+    "proof": true,
+    "cleanup": true
+  },
+  "generated_at": "2026-06-11T00:00:00Z"
 }
 ```
 
