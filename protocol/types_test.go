@@ -1028,6 +1028,25 @@ func TestRuntimeBackendHelpersIgnoreInvalidSupportedReports(t *testing.T) {
 	}
 }
 
+func TestRuntimeBackendHelpersIgnoreInvalidManagedBundleReports(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.BackendID = "managed-containerd-linux-amd64"
+	report.Family = protocol.RuntimeBackendFamilyContainerd
+	report.Tool = protocol.ContainerRuntimeNerdctl
+	report.Version = "v1.2.3"
+	report.InstallBurden = protocol.RuntimeInstallBundled
+	bundle := validManagedRuntimeBundleDescriptor()
+	bundle.ValidUntil = time.Unix(1_700_000_000, 0).UTC()
+	report.Bundle = &bundle
+
+	if got := protocol.RuntimeBackendReportsSupportedExecutors([]protocol.RuntimeBackendReport{report}); len(got) != 0 {
+		t.Fatalf("expired managed bundle report produced executors: %+v", got)
+	}
+	if got := protocol.ProviderCapabilityReportsFromRuntimeBackends([]protocol.RuntimeBackendReport{report}); len(got) != 0 {
+		t.Fatalf("expired managed bundle report produced capability reports: %+v", got)
+	}
+}
+
 func TestRuntimeBackendReportRejectsInvalidExecutorProofMetadata(t *testing.T) {
 	report := validRuntimeBackendReport()
 	report.Executors[0].Provider = "bad provider"
@@ -1077,6 +1096,151 @@ func TestRuntimeBackendReportRejectsUnsafePublicStrings(t *testing.T) {
 	}
 }
 
+func TestManagedRuntimeBundleDescriptorValidatesSignedScopedBundle(t *testing.T) {
+	descriptor := validManagedRuntimeBundleDescriptor()
+	if err := descriptor.ValidateAt(time.Unix(1_700_000_000, 0).UTC()); err != nil {
+		t.Fatalf("managed runtime bundle descriptor invalid: %v", err)
+	}
+}
+
+func TestManagedRuntimeBundleDescriptorRejectsIncompleteTrustAndScope(t *testing.T) {
+	descriptor := validManagedRuntimeBundleDescriptor()
+	descriptor.ArtifactDigest = "sha256:not-hex"
+	descriptor.SignatureDigest = ""
+	descriptor.SignatureIssuer = ""
+	descriptor.SignatureKeyID = ""
+	descriptor.TrustRootDigest = ""
+	descriptor.ValidUntil = time.Time{}
+	descriptor.UpdatePolicy.Channel = ""
+	descriptor.UpdatePolicy.MinSupportedVersion = ""
+	descriptor.CVEPolicy.BlockedVersions = []string{"bad version"}
+	descriptor.ScopedStore.Required = false
+	descriptor.ScopedStore.HostGlobalVisibilityForbidden = false
+	descriptor.SupportedTargets = nil
+	descriptor.SignatureSubject.OS = "windows"
+
+	err := descriptor.Validate()
+	if err == nil {
+		t.Fatal("expected incomplete managed runtime bundle descriptor to fail")
+	}
+	for _, want := range []string{
+		"artifact_digest",
+		"signature_digest",
+		"signature_issuer",
+		"signature_key_id",
+		"trust_root_digest",
+		"valid_until",
+		"update_policy.channel",
+		"update_policy.min_supported_version",
+		"cve_policy.blocked_versions[0]",
+		"scoped_store.required",
+		"scoped_store.host_global_visibility_forbidden",
+		"supported_targets",
+		"signature_subject.os",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected descriptor error to contain %q, got %v", want, err)
+		}
+	}
+}
+
+func TestManagedRuntimeBundleDescriptorRejectsUnsafePublicStrings(t *testing.T) {
+	for field, mutate := range map[string]func(*protocol.ManagedRuntimeBundleDescriptor){
+		"version": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.Version = "runtime\noutput"
+		},
+		"os": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.OS = "linux\nextra"
+		},
+		"artifact_name": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.ArtifactName = joinedRuntimeMarker("cre", "dential")
+		},
+		"signature_issuer": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.SignatureIssuer = "issuer\nextra"
+		},
+		"signature_key_id": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.SignatureKeyID = joinedRuntimeMarker("bear", "er")
+		},
+		"signature_subject.version": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.SignatureSubject.Version = "v1.2.3\nextra"
+		},
+		"supported_targets[0].os": func(descriptor *protocol.ManagedRuntimeBundleDescriptor) {
+			descriptor.SupportedTargets[0].OS = "linux\nextra"
+		},
+	} {
+		descriptor := validManagedRuntimeBundleDescriptor()
+		mutate(&descriptor)
+		err := descriptor.Validate()
+		if err == nil || !strings.Contains(err.Error(), field) {
+			t.Fatalf("expected unsafe %s to fail, got %v", field, err)
+		}
+	}
+}
+
+func TestManagedRuntimeBundleDescriptorRejectsZeroValidationTime(t *testing.T) {
+	descriptor := validManagedRuntimeBundleDescriptor()
+
+	err := descriptor.ValidateAt(time.Time{})
+	if err == nil || !strings.Contains(err.Error(), "validation time") {
+		t.Fatalf("expected zero validation time to fail, got %v", err)
+	}
+}
+
+func TestManagedRuntimeBundleDescriptorRejectsExpiredBundle(t *testing.T) {
+	descriptor := validManagedRuntimeBundleDescriptor()
+	descriptor.ValidUntil = time.Unix(1_800_000_000, 0).UTC()
+
+	err := descriptor.ValidateAt(time.Unix(1_900_000_000, 0).UTC())
+	if err == nil || !strings.Contains(err.Error(), "valid_until") {
+		t.Fatalf("expected expired bundle to fail, got %v", err)
+	}
+}
+
+func TestRuntimeBackendReportRequiresValidManagedBundleForBundledSupport(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.BackendID = "managed-containerd-linux-amd64"
+	report.Family = protocol.RuntimeBackendFamilyContainerd
+	report.Tool = protocol.ContainerRuntimeNerdctl
+	report.Version = "v1.2.3"
+	report.InstallBurden = protocol.RuntimeInstallBundled
+	report.Bundle = &protocol.ManagedRuntimeBundleDescriptor{
+		BundleID: "managed-containerd-linux-amd64",
+		Version:  "v1.2.3",
+	}
+
+	err := report.Validate()
+	if err == nil {
+		t.Fatal("expected supported bundled runtime with incomplete bundle to fail")
+	}
+	if !strings.Contains(err.Error(), "bundle") || !strings.Contains(err.Error(), "signature") {
+		t.Fatalf("expected bundle signature error, got %v", err)
+	}
+
+	report.Bundle = nil
+	if err := report.Validate(); err == nil || !strings.Contains(err.Error(), "bundle is required") {
+		t.Fatalf("expected missing bundle to fail for supported bundled runtime, got %v", err)
+	}
+
+	report.Bundle = ptrManagedRuntimeBundleDescriptor(validManagedRuntimeBundleDescriptor())
+	if err := report.Validate(); err != nil {
+		t.Fatalf("supported bundled runtime rejected valid managed bundle: %v", err)
+	}
+}
+
+func TestRuntimeBackendReportRejectsBundleWithMismatchedInstallBurden(t *testing.T) {
+	report := validRuntimeBackendReport()
+	report.BackendID = "managed-containerd-linux-amd64"
+	report.Family = protocol.RuntimeBackendFamilyContainerd
+	report.Tool = protocol.ContainerRuntimeNerdctl
+	report.Version = "v1.2.3"
+	report.Bundle = ptrManagedRuntimeBundleDescriptor(validManagedRuntimeBundleDescriptor())
+
+	err := report.Validate()
+	if err == nil || !strings.Contains(err.Error(), "install_burden") {
+		t.Fatalf("expected bundle with non-bundled install burden to fail, got %v", err)
+	}
+}
+
 func validRuntimeBackendReport() protocol.RuntimeBackendReport {
 	return protocol.RuntimeBackendReport{
 		ProtocolVersion: protocol.Version,
@@ -1121,6 +1285,70 @@ func validRuntimeBackendReport() protocol.RuntimeBackendReport {
 		},
 		GeneratedAt: time.Unix(1_700_000_000, 0).UTC(),
 	}
+}
+
+func validManagedRuntimeBundleDescriptor() protocol.ManagedRuntimeBundleDescriptor {
+	return protocol.ManagedRuntimeBundleDescriptor{
+		ProtocolVersion: protocol.Version,
+		BundleID:        "managed-containerd-linux-amd64",
+		Family:          protocol.RuntimeBackendFamilyContainerd,
+		Tool:            protocol.ContainerRuntimeNerdctl,
+		Version:         "v1.2.3",
+		OS:              "linux",
+		Arch:            "amd64",
+		ArtifactName:    "managed-containerd-linux-amd64.tar.zst",
+		ArtifactDigest:  "sha256:" + strings.Repeat("1", 64),
+		ChecksumName:    "managed-containerd-linux-amd64.sha256",
+		ChecksumDigest:  "sha256:" + strings.Repeat("2", 64),
+		SignatureName:   "managed-containerd-linux-amd64.sig",
+		SignatureDigest: "sha256:" + strings.Repeat("3", 64),
+		SignatureIssuer: "workflow-plugin-compute-container-release",
+		SignatureKeyID:  "workflow-compute-container-stable",
+		TrustRootDigest: "sha256:" + strings.Repeat("4", 64),
+		SignatureSubject: protocol.ManagedRuntimeSignatureSubject{
+			ArtifactDigest:          "sha256:" + strings.Repeat("1", 64),
+			RuntimeFamily:           protocol.RuntimeBackendFamilyContainerd,
+			OS:                      "linux",
+			Arch:                    "amd64",
+			Version:                 "v1.2.3",
+			Channel:                 "stable",
+			ConformanceProfile:      "workspace-network-env-proof-cleanup",
+			ScopedStorePolicyDigest: "sha256:" + strings.Repeat("5", 64),
+		},
+		ValidUntil: time.Unix(4_102_444_800, 0).UTC(),
+		UpdatePolicy: protocol.ManagedRuntimeUpdatePolicy{
+			Channel:             "stable",
+			MinSupportedVersion: "v1.2.0",
+		},
+		CVEPolicy: protocol.ManagedRuntimeCVEPolicy{
+			PolicyDigest:     "sha256:" + strings.Repeat("6", 64),
+			BlockedVersions:  []string{"v1.1.0"},
+			RevokedKeyIDs:    []string{"old-workflow-compute-container-stable"},
+			UpdatedByVersion: "v1.2.3",
+		},
+		ScopedStore: protocol.ManagedRuntimeScopedStorePolicy{
+			Required:                      true,
+			NamespaceStrategy:             "opaque-worker-pool-scope",
+			StoreStrategy:                 "workflow-owned-content-store",
+			PolicyDigest:                  "sha256:" + strings.Repeat("5", 64),
+			CleanupRequired:               true,
+			HostGlobalVisibilityForbidden: true,
+		},
+		SupportedTargets: []protocol.ManagedRuntimeTarget{{
+			OS:   "linux",
+			Arch: "amd64",
+		}},
+		ConformanceProfile: "workspace-network-env-proof-cleanup",
+		InstallBurden:      protocol.RuntimeInstallBundled,
+	}
+}
+
+func ptrManagedRuntimeBundleDescriptor(descriptor protocol.ManagedRuntimeBundleDescriptor) *protocol.ManagedRuntimeBundleDescriptor {
+	return &descriptor
+}
+
+func joinedRuntimeMarker(prefix, suffix string) string {
+	return prefix + suffix
 }
 
 func TestRequiredHardwareClass(t *testing.T) {

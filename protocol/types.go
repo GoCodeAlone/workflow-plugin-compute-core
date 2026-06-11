@@ -700,28 +700,249 @@ type RuntimeBackendEvidence struct {
 	Details   []string `json:"details,omitempty"`
 }
 
+type ManagedRuntimeSignatureSubject struct {
+	ArtifactDigest          string               `json:"artifact_digest"`
+	RuntimeFamily           RuntimeBackendFamily `json:"runtime_family"`
+	OS                      string               `json:"os"`
+	Arch                    string               `json:"arch"`
+	Version                 string               `json:"version"`
+	Channel                 string               `json:"channel"`
+	ConformanceProfile      string               `json:"conformance_profile"`
+	ScopedStorePolicyDigest string               `json:"scoped_store_policy_digest"`
+}
+
+type ManagedRuntimeUpdatePolicy struct {
+	Channel             string   `json:"channel"`
+	MinSupportedVersion string   `json:"min_supported_version"`
+	BlockedVersions     []string `json:"blocked_versions,omitempty"`
+}
+
+type ManagedRuntimeCVEPolicy struct {
+	PolicyDigest     string   `json:"policy_digest"`
+	BlockedVersions  []string `json:"blocked_versions,omitempty"`
+	RevokedKeyIDs    []string `json:"revoked_key_ids,omitempty"`
+	UpdatedByVersion string   `json:"updated_by_version"`
+}
+
+type ManagedRuntimeScopedStorePolicy struct {
+	Required                      bool   `json:"required"`
+	NamespaceStrategy             string `json:"namespace_strategy"`
+	StoreStrategy                 string `json:"store_strategy"`
+	PolicyDigest                  string `json:"policy_digest"`
+	CleanupRequired               bool   `json:"cleanup_required"`
+	HostGlobalVisibilityForbidden bool   `json:"host_global_visibility_forbidden"`
+}
+
+type ManagedRuntimeTarget struct {
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+}
+
+type ManagedRuntimeBundleDescriptor struct {
+	ProtocolVersion    string                          `json:"protocol_version,omitempty"`
+	BundleID           string                          `json:"bundle_id"`
+	Family             RuntimeBackendFamily            `json:"family"`
+	Tool               ContainerRuntimeTool            `json:"tool,omitempty"`
+	Version            string                          `json:"version"`
+	OS                 string                          `json:"os"`
+	Arch               string                          `json:"arch"`
+	ArtifactName       string                          `json:"artifact_name"`
+	ArtifactDigest     string                          `json:"artifact_digest"`
+	ChecksumName       string                          `json:"checksum_name"`
+	ChecksumDigest     string                          `json:"checksum_digest"`
+	SignatureName      string                          `json:"signature_name"`
+	SignatureDigest    string                          `json:"signature_digest"`
+	SignatureIssuer    string                          `json:"signature_issuer"`
+	SignatureKeyID     string                          `json:"signature_key_id"`
+	TrustRootDigest    string                          `json:"trust_root_digest"`
+	SignatureSubject   ManagedRuntimeSignatureSubject  `json:"signature_subject"`
+	ValidUntil         time.Time                       `json:"valid_until,omitzero"`
+	UpdatePolicy       ManagedRuntimeUpdatePolicy      `json:"update_policy"`
+	CVEPolicy          ManagedRuntimeCVEPolicy         `json:"cve_policy"`
+	ScopedStore        ManagedRuntimeScopedStorePolicy `json:"scoped_store"`
+	SupportedTargets   []ManagedRuntimeTarget          `json:"supported_targets"`
+	ConformanceProfile string                          `json:"conformance_profile"`
+	InstallBurden      RuntimeInstallBurden            `json:"install_burden"`
+}
+
+func (d ManagedRuntimeBundleDescriptor) Validate() error {
+	return d.ValidateAt(time.Now())
+}
+
+func (d ManagedRuntimeBundleDescriptor) ValidateAt(now time.Time) error {
+	var errs []error
+	if now.IsZero() {
+		errs = append(errs, errors.New("validation time is required"))
+	}
+	if d.ProtocolVersion != "" && d.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("bundle_id", d.BundleID)...)
+	if d.Family == "" {
+		errs = append(errs, errors.New("family is required"))
+	} else if !validRuntimeBackendFamily(d.Family) {
+		errs = append(errs, fmt.Errorf("family %q is unsupported", d.Family))
+	}
+	if d.Tool != "" && !validContainerRuntimeTool(d.Tool) {
+		errs = append(errs, fmt.Errorf("tool %q is unsupported", d.Tool))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("version", d.Version)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("os", d.OS)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("arch", d.Arch)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("artifact_name", d.ArtifactName)...)
+	errs = append(errs, validateRequiredSHA256Digest("artifact_digest", d.ArtifactDigest)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("checksum_name", d.ChecksumName)...)
+	errs = append(errs, validateRequiredSHA256Digest("checksum_digest", d.ChecksumDigest)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_name", d.SignatureName)...)
+	errs = append(errs, validateRequiredSHA256Digest("signature_digest", d.SignatureDigest)...)
+	errs = append(errs, validateRequiredRuntimePublicText("signature_issuer", d.SignatureIssuer)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_key_id", d.SignatureKeyID)...)
+	errs = append(errs, validateRequiredSHA256Digest("trust_root_digest", d.TrustRootDigest)...)
+	errs = append(errs, d.SignatureSubject.validateAgainst(d)...)
+	if d.ValidUntil.IsZero() {
+		errs = append(errs, errors.New("valid_until is required"))
+	} else if !d.ValidUntil.After(now) {
+		errs = append(errs, errors.New("valid_until must be in the future"))
+	}
+	errs = append(errs, d.UpdatePolicy.Validate()...)
+	errs = append(errs, d.CVEPolicy.Validate()...)
+	errs = append(errs, d.ScopedStore.Validate()...)
+	errs = append(errs, validateManagedRuntimeTargets(d.SupportedTargets, d.OS, d.Arch)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("conformance_profile", d.ConformanceProfile)...)
+	if d.InstallBurden == "" {
+		errs = append(errs, errors.New("install_burden is required"))
+	} else if d.InstallBurden != RuntimeInstallBundled {
+		errs = append(errs, errors.New("install_burden must be bundled for managed runtime bundles"))
+	}
+	return errors.Join(errs...)
+}
+
+func (s ManagedRuntimeSignatureSubject) validateAgainst(d ManagedRuntimeBundleDescriptor) []error {
+	var errs []error
+	errs = append(errs, validateRequiredSHA256Digest("signature_subject.artifact_digest", s.ArtifactDigest)...)
+	if s.ArtifactDigest != "" && d.ArtifactDigest != "" && s.ArtifactDigest != d.ArtifactDigest {
+		errs = append(errs, errors.New("signature_subject.artifact_digest must match artifact_digest"))
+	}
+	if s.RuntimeFamily == "" {
+		errs = append(errs, errors.New("signature_subject.runtime_family is required"))
+	} else if !validRuntimeBackendFamily(s.RuntimeFamily) {
+		errs = append(errs, fmt.Errorf("signature_subject.runtime_family %q is unsupported", s.RuntimeFamily))
+	} else if d.Family != "" && s.RuntimeFamily != d.Family {
+		errs = append(errs, errors.New("signature_subject.runtime_family must match family"))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_subject.os", s.OS)...)
+	if s.OS != "" && d.OS != "" && s.OS != d.OS {
+		errs = append(errs, errors.New("signature_subject.os must match os"))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_subject.arch", s.Arch)...)
+	if s.Arch != "" && d.Arch != "" && s.Arch != d.Arch {
+		errs = append(errs, errors.New("signature_subject.arch must match arch"))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_subject.version", s.Version)...)
+	if s.Version != "" && d.Version != "" && s.Version != d.Version {
+		errs = append(errs, errors.New("signature_subject.version must match version"))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_subject.channel", s.Channel)...)
+	if s.Channel != "" && d.UpdatePolicy.Channel != "" && s.Channel != d.UpdatePolicy.Channel {
+		errs = append(errs, errors.New("signature_subject.channel must match update_policy.channel"))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("signature_subject.conformance_profile", s.ConformanceProfile)...)
+	if s.ConformanceProfile != "" && d.ConformanceProfile != "" && s.ConformanceProfile != d.ConformanceProfile {
+		errs = append(errs, errors.New("signature_subject.conformance_profile must match conformance_profile"))
+	}
+	errs = append(errs, validateRequiredSHA256Digest("signature_subject.scoped_store_policy_digest", s.ScopedStorePolicyDigest)...)
+	if s.ScopedStorePolicyDigest != "" && d.ScopedStore.PolicyDigest != "" && s.ScopedStorePolicyDigest != d.ScopedStore.PolicyDigest {
+		errs = append(errs, errors.New("signature_subject.scoped_store_policy_digest must match scoped_store.policy_digest"))
+	}
+	return errs
+}
+
+func (p ManagedRuntimeUpdatePolicy) Validate() []error {
+	var errs []error
+	errs = append(errs, validateRequiredRuntimeIdentifier("update_policy.channel", p.Channel)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("update_policy.min_supported_version", p.MinSupportedVersion)...)
+	for idx, version := range p.BlockedVersions {
+		errs = append(errs, validateRequiredRuntimeIdentifier(fmt.Sprintf("update_policy.blocked_versions[%d]", idx), version)...)
+	}
+	return errs
+}
+
+func (p ManagedRuntimeCVEPolicy) Validate() []error {
+	var errs []error
+	errs = append(errs, validateRequiredSHA256Digest("cve_policy.policy_digest", p.PolicyDigest)...)
+	for idx, version := range p.BlockedVersions {
+		errs = append(errs, validateRequiredRuntimeIdentifier(fmt.Sprintf("cve_policy.blocked_versions[%d]", idx), version)...)
+	}
+	for idx, keyID := range p.RevokedKeyIDs {
+		errs = append(errs, validateRequiredRuntimeIdentifier(fmt.Sprintf("cve_policy.revoked_key_ids[%d]", idx), keyID)...)
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("cve_policy.updated_by_version", p.UpdatedByVersion)...)
+	return errs
+}
+
+func (p ManagedRuntimeScopedStorePolicy) Validate() []error {
+	var errs []error
+	if !p.Required {
+		errs = append(errs, errors.New("scoped_store.required must be true"))
+	}
+	errs = append(errs, validateRequiredRuntimeIdentifier("scoped_store.namespace_strategy", p.NamespaceStrategy)...)
+	errs = append(errs, validateRequiredRuntimeIdentifier("scoped_store.store_strategy", p.StoreStrategy)...)
+	errs = append(errs, validateRequiredSHA256Digest("scoped_store.policy_digest", p.PolicyDigest)...)
+	if !p.CleanupRequired {
+		errs = append(errs, errors.New("scoped_store.cleanup_required must be true"))
+	}
+	if !p.HostGlobalVisibilityForbidden {
+		errs = append(errs, errors.New("scoped_store.host_global_visibility_forbidden must be true"))
+	}
+	return errs
+}
+
+func validateManagedRuntimeTargets(targets []ManagedRuntimeTarget, artifactOS, artifactArch string) []error {
+	var errs []error
+	if len(targets) == 0 {
+		return []error{errors.New("supported_targets are required")}
+	}
+	var containsArtifactTarget bool
+	for idx, target := range targets {
+		errs = append(errs, validateRequiredRuntimeIdentifier(fmt.Sprintf("supported_targets[%d].os", idx), target.OS)...)
+		errs = append(errs, validateRequiredRuntimeIdentifier(fmt.Sprintf("supported_targets[%d].arch", idx), target.Arch)...)
+		if target.OS == artifactOS && target.Arch == artifactArch {
+			containsArtifactTarget = true
+		}
+	}
+	if !containsArtifactTarget {
+		errs = append(errs, errors.New("supported_targets must include os/arch"))
+	}
+	return errs
+}
+
 type RuntimeBackendReport struct {
-	ProtocolVersion     string                 `json:"protocol_version,omitempty"`
-	BackendID           string                 `json:"backend_id"`
-	Family              RuntimeBackendFamily   `json:"family"`
-	Tool                ContainerRuntimeTool   `json:"tool,omitempty"`
-	Version             string                 `json:"version,omitempty"`
-	OS                  string                 `json:"os,omitempty"`
-	Arch                string                 `json:"arch,omitempty"`
-	Status              RuntimeBackendStatus   `json:"status"`
-	Reason              string                 `json:"reason,omitempty"`
-	IsolationMode       RuntimeIsolationMode   `json:"isolation_mode"`
-	InstallBurden       RuntimeInstallBurden   `json:"install_burden,omitempty"`
-	RuntimeProfiles     []RuntimeProfile       `json:"runtime_profiles,omitempty"`
-	ExecutorProviders   []string               `json:"executor_providers,omitempty"`
-	Executors           []ExecutorRef          `json:"executors,omitempty"`
-	ConformanceProfiles []string               `json:"conformance_profiles,omitempty"`
-	Evidence            RuntimeBackendEvidence `json:"evidence,omitzero"`
-	GeneratedAt         time.Time              `json:"generated_at,omitzero"`
-	Constraints         []string               `json:"constraints,omitempty"`
+	ProtocolVersion     string                          `json:"protocol_version,omitempty"`
+	BackendID           string                          `json:"backend_id"`
+	Family              RuntimeBackendFamily            `json:"family"`
+	Tool                ContainerRuntimeTool            `json:"tool,omitempty"`
+	Version             string                          `json:"version,omitempty"`
+	OS                  string                          `json:"os,omitempty"`
+	Arch                string                          `json:"arch,omitempty"`
+	Status              RuntimeBackendStatus            `json:"status"`
+	Reason              string                          `json:"reason,omitempty"`
+	IsolationMode       RuntimeIsolationMode            `json:"isolation_mode"`
+	InstallBurden       RuntimeInstallBurden            `json:"install_burden,omitempty"`
+	RuntimeProfiles     []RuntimeProfile                `json:"runtime_profiles,omitempty"`
+	ExecutorProviders   []string                        `json:"executor_providers,omitempty"`
+	Executors           []ExecutorRef                   `json:"executors,omitempty"`
+	ConformanceProfiles []string                        `json:"conformance_profiles,omitempty"`
+	Evidence            RuntimeBackendEvidence          `json:"evidence,omitzero"`
+	Bundle              *ManagedRuntimeBundleDescriptor `json:"bundle,omitempty"`
+	GeneratedAt         time.Time                       `json:"generated_at,omitzero"`
+	Constraints         []string                        `json:"constraints,omitempty"`
 }
 
 func (r RuntimeBackendReport) Validate() error {
+	return r.ValidateAt(time.Now())
+}
+
+func (r RuntimeBackendReport) ValidateAt(now time.Time) error {
 	var errs []error
 	if err := validateIdentifier("backend_id", r.BackendID); err != nil {
 		errs = append(errs, err)
@@ -781,6 +1002,29 @@ func (r RuntimeBackendReport) Validate() error {
 		}
 	}
 	errs = append(errs, validateRuntimeBackendEvidence(r.Evidence)...)
+	if r.Bundle != nil {
+		if r.InstallBurden != RuntimeInstallBundled {
+			errs = append(errs, errors.New("install_burden must be bundled when bundle is present"))
+		}
+		if err := r.Bundle.ValidateAt(now); err != nil {
+			errs = append(errs, fmt.Errorf("bundle: %w", err))
+		}
+		if r.Bundle.Family != "" && r.Family != "" && r.Bundle.Family != r.Family {
+			errs = append(errs, errors.New("bundle.family must match family"))
+		}
+		if r.Bundle.Tool != "" && r.Tool != "" && r.Bundle.Tool != r.Tool {
+			errs = append(errs, errors.New("bundle.tool must match tool"))
+		}
+		if r.Bundle.OS != "" && r.OS != "" && r.Bundle.OS != r.OS {
+			errs = append(errs, errors.New("bundle.os must match os"))
+		}
+		if r.Bundle.Arch != "" && r.Arch != "" && r.Bundle.Arch != r.Arch {
+			errs = append(errs, errors.New("bundle.arch must match arch"))
+		}
+		if r.Bundle.Version != "" && r.Version != "" && r.Bundle.Version != r.Version {
+			errs = append(errs, errors.New("bundle.version must match version"))
+		}
+	}
 	errs = append(errs, validateRuntimeBackendPublicText("reason", r.Reason)...)
 	for idx, constraint := range r.Constraints {
 		errs = append(errs, validateRuntimeBackendPublicText(fmt.Sprintf("constraints[%d]", idx), constraint)...)
@@ -788,6 +1032,9 @@ func (r RuntimeBackendReport) Validate() error {
 
 	switch r.Status {
 	case RuntimeBackendSupported:
+		if r.InstallBurden == RuntimeInstallBundled && r.Bundle == nil {
+			errs = append(errs, errors.New("bundle is required for supported bundled runtime backend"))
+		}
 		if len(r.ExecutorProviders) == 0 {
 			errs = append(errs, errors.New("executor_providers are required for supported runtime backend"))
 		}
@@ -831,8 +1078,9 @@ func (r RuntimeBackendReport) Validate() error {
 
 func RuntimeBackendReportsSupportedExecutors(reports []RuntimeBackendReport) []ExecutorRef {
 	var executors []ExecutorRef
+	now := time.Now()
 	for _, report := range reports {
-		if report.Status != RuntimeBackendSupported || report.Validate() != nil {
+		if report.Status != RuntimeBackendSupported || report.ValidateAt(now) != nil {
 			continue
 		}
 		executors = append(executors, report.Executors...)
@@ -843,8 +1091,9 @@ func RuntimeBackendReportsSupportedExecutors(reports []RuntimeBackendReport) []E
 func ProviderCapabilityReportsFromRuntimeBackends(reports []RuntimeBackendReport) []ProviderCapabilityReport {
 	var capabilities []ProviderCapabilityReport
 	seen := map[string]struct{}{}
+	now := time.Now()
 	for _, report := range reports {
-		if report.Status != RuntimeBackendSupported || report.Validate() != nil {
+		if report.Status != RuntimeBackendSupported || report.ValidateAt(now) != nil {
 			continue
 		}
 		for _, provider := range report.ExecutorProviders {
@@ -5526,6 +5775,33 @@ func validateRuntimeBackendEvidence(evidence RuntimeBackendEvidence) []error {
 		errs = append(errs, validateRuntimeBackendPublicText(fmt.Sprintf("evidence.details[%d]", idx), detail)...)
 	}
 	return errs
+}
+
+func validateRequiredRuntimeIdentifier(field, value string) []error {
+	if err := validateIdentifier(field, value); err != nil {
+		return []error{err}
+	}
+	return validateRuntimeBackendPublicText(field, value)
+}
+
+func validateRequiredRuntimePublicText(field, value string) []error {
+	if strings.TrimSpace(value) == "" {
+		return []error{fmt.Errorf("%s is required", field)}
+	}
+	if strings.TrimSpace(value) != value {
+		return []error{fmt.Errorf("%s must not contain leading or trailing whitespace", field)}
+	}
+	return validateRuntimeBackendPublicText(field, value)
+}
+
+func validateRequiredSHA256Digest(field, value string) []error {
+	if value == "" {
+		return []error{fmt.Errorf("%s is required", field)}
+	}
+	if !validSHA256Digest(value) {
+		return []error{fmt.Errorf("%s must be sha256:<64 lowercase hex chars>", field)}
+	}
+	return nil
 }
 
 func validateRuntimeBackendExecutor(executor ExecutorRef) error {

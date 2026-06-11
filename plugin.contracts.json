@@ -33,7 +33,40 @@
       "produces": [
         "executor_providers",
         "provider_capability_reports"
-      ]
+      ],
+      "managedRuntimeBundleField": "bundle",
+      "supportedBundledRuntimeRequiresBundle": true
+    },
+    {
+      "name": "ManagedRuntimeBundleDescriptor",
+      "wire": "json",
+      "goType": "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol.ManagedRuntimeBundleDescriptor",
+      "protocolVersion": "compute.v1alpha1",
+      "requires": [
+        "bundle_id",
+        "family",
+        "version",
+        "os",
+        "arch",
+        "artifact_name",
+        "artifact_digest",
+        "checksum_name",
+        "checksum_digest",
+        "signature_name",
+        "signature_digest",
+        "signature_issuer",
+        "signature_key_id",
+        "trust_root_digest",
+        "signature_subject",
+        "valid_until",
+        "update_policy",
+        "cve_policy",
+        "scoped_store",
+        "supported_targets",
+        "conformance_profile",
+        "install_burden"
+      ],
+      "installBurden": "bundled"
     }
   ]
 }
