@@ -5530,9 +5530,15 @@ func (h SettlementHold) Validate() error {
 		if !h.ResolvedAt.IsZero() {
 			errs = append(errs, errors.New("resolved_at must be empty for pending hold"))
 		}
+		if h.CorrectionEventID != "" {
+			errs = append(errs, errors.New("correction_event_id must be empty for pending hold"))
+		}
 	case SettlementHoldReleased:
 		if h.ResolvedAt.IsZero() {
 			errs = append(errs, errors.New("resolved_at is required for released hold"))
+		}
+		if h.CorrectionEventID != "" {
+			errs = append(errs, errors.New("correction_event_id must be empty for released hold"))
 		}
 	case SettlementHoldReversed:
 		if h.ResolvedAt.IsZero() {
@@ -5877,6 +5883,8 @@ func (p MarketplaceOperationsPolicy) Validate() error {
 	}
 	if strings.TrimSpace(p.AbuseContact) == "" {
 		errs = append(errs, errors.New("abuse_contact is required when enabled"))
+	} else if strings.TrimSpace(p.AbuseContact) != p.AbuseContact || strings.ContainsAny(p.AbuseContact, "\r\n\t\x00") {
+		errs = append(errs, errors.New("abuse_contact must not contain leading, trailing, or control whitespace"))
 	}
 	seen := map[string]struct{}{}
 	if p.ActivePayoutKeyID != "" {

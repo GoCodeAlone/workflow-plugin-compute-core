@@ -2638,6 +2638,41 @@ func TestMarketplacePoliciesRejectMalformedRotations(t *testing.T) {
 	}
 }
 
+func TestMarketplaceContractsRejectAmbiguousHoldAndContactState(t *testing.T) {
+	now := time.Now().UTC()
+	hold := protocol.SettlementHold{
+		ProtocolVersion:     protocol.Version,
+		ID:                  "hold-1",
+		OrgID:               "org-1",
+		ProductID:           "capture-product",
+		AccountID:           "acct-1",
+		ContributionEventID: "contribution-1",
+		Reason:              "dispute window",
+		Status:              protocol.SettlementHoldPending,
+		CorrectionEventID:   "correction-1",
+		CreatedAt:           now,
+	}
+	if err := hold.Validate(); err == nil || !strings.Contains(err.Error(), "correction_event_id") {
+		t.Fatalf("expected correction_event_id rejection for pending hold, got %v", err)
+	}
+
+	opsPolicy := protocol.MarketplaceOperationsPolicy{
+		ProtocolVersion:     protocol.Version,
+		ID:                  "marketplace-ops",
+		Enabled:             true,
+		Version:             1,
+		TermsVersion:        "terms-v1",
+		RewardPolicyVersion: "rewards-v1",
+		DisputeWindowHours:  72,
+		AbuseContact:        " abuse@example.invalid\n",
+		PayoutProvider:      "stripe",
+		ActivePayoutKeyID:   "payout-key-1",
+	}
+	if err := opsPolicy.Validate(); err == nil || !strings.Contains(err.Error(), "abuse_contact") {
+		t.Fatalf("expected abuse_contact whitespace rejection, got %v", err)
+	}
+}
+
 func TestMarketplaceContractsRejectMissingScopeIdentifiers(t *testing.T) {
 	payout := protocol.SettlementPayoutRequest{
 		ProtocolVersion: protocol.Version,
