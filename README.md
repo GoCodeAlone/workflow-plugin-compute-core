@@ -32,6 +32,13 @@ doctor, and real conformance execution belong in runtime plugins such as
 valid signed, updateable, scoped bundle descriptor. Degraded or unsupported
 reports may omit the bundle and must continue to avoid executor advertisements.
 
+Marketplace operations use the settlement hold, payout holdback request,
+operator policy, trust-root rotation, operations policy, suspension,
+reputation, and abuse-case contracts in `protocol/`. These are portable data
+contracts and validators only. Admission, authorization, ledger mutation, payout
+dispatch, audit persistence, dashboards, and operator workflows remain owned by
+the assembling control-plane application.
+
 The task/proof client covers submission and read-only observation:
 
 - `SubmitTask`
@@ -40,10 +47,11 @@ The task/proof client covers submission and read-only observation:
 - `ListProofs`
 - `FindProof`
 
-Application-specific scheduling, task mutation policy, settlement, dashboards,
-worker supervision, local-agent rollout, and control-plane storage/authz remain
-outside this core plugin. Those concerns may be extracted into a reusable
-control-plane component later, but they are not implemented by compute-core.
+Application-specific scheduling, task mutation policy, settlement execution,
+marketplace operations execution, dashboards, worker supervision, local-agent
+rollout, and control-plane storage/authz remain outside this core plugin. Those
+concerns may be extracted into a reusable control-plane component later, but
+they are not implemented by compute-core.
 
 This plugin intentionally advertises no module, step, trigger, or IaC runtime
 capabilities.

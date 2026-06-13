@@ -5478,6 +5478,789 @@ func (c *ProviderContract) ApplyProviderConformanceEvidence(evidence ProviderCon
 	return fmt.Errorf("provider conformance evidence %q runtime profile %q does not match provider contract", evidence.ID, evidence.RuntimeProfileID)
 }
 
+type SettlementHoldStatus string
+
+const (
+	SettlementHoldPending  SettlementHoldStatus = "pending"
+	SettlementHoldReleased SettlementHoldStatus = "released"
+	SettlementHoldReversed SettlementHoldStatus = "reversed"
+)
+
+type SettlementHold struct {
+	ProtocolVersion     string               `json:"protocol_version,omitempty"`
+	ID                  string               `json:"id"`
+	OrgID               string               `json:"org_id"`
+	ProductID           string               `json:"product_id"`
+	AccountID           string               `json:"account_id"`
+	ContributionEventID string               `json:"contribution_event_id"`
+	Reason              string               `json:"reason"`
+	Status              SettlementHoldStatus `json:"status"`
+	HoldUntil           time.Time            `json:"hold_until,omitempty"`
+	CreatedAt           time.Time            `json:"created_at,omitempty"`
+	ResolvedAt          time.Time            `json:"resolved_at,omitempty"`
+	CorrectionEventID   string               `json:"correction_event_id,omitempty"`
+}
+
+func (h SettlementHold) Validate() error {
+	var errs []error
+	if h.ProtocolVersion != "" && h.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: h.ID},
+		{name: "org_id", value: h.OrgID},
+		{name: "account_id", value: h.AccountID},
+		{name: "contribution_event_id", value: h.ContributionEventID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := validateNetworkProductID(h.ProductID); err != nil {
+		errs = append(errs, fmt.Errorf("product_id: %w", err))
+	}
+	if strings.TrimSpace(h.Reason) == "" {
+		errs = append(errs, errors.New("reason is required"))
+	}
+	switch h.Status {
+	case SettlementHoldPending:
+		if !h.ResolvedAt.IsZero() {
+			errs = append(errs, errors.New("resolved_at must be empty for pending hold"))
+		}
+		if h.CorrectionEventID != "" {
+			errs = append(errs, errors.New("correction_event_id must be empty for pending hold"))
+		}
+	case SettlementHoldReleased:
+		if h.ResolvedAt.IsZero() {
+			errs = append(errs, errors.New("resolved_at is required for released hold"))
+		}
+		if h.CorrectionEventID != "" {
+			errs = append(errs, errors.New("correction_event_id must be empty for released hold"))
+		}
+	case SettlementHoldReversed:
+		if h.ResolvedAt.IsZero() {
+			errs = append(errs, errors.New("resolved_at is required for reversed hold"))
+		}
+		if h.CorrectionEventID == "" {
+			errs = append(errs, errors.New("correction_event_id is required for reversed hold"))
+		}
+	case "":
+		errs = append(errs, errors.New("status is required"))
+	default:
+		errs = append(errs, fmt.Errorf("status %q is unsupported", h.Status))
+	}
+	if h.CorrectionEventID != "" {
+		if err := validateIdentifier("correction_event_id", h.CorrectionEventID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type SettlementPayoutRequest struct {
+	ProtocolVersion          string            `json:"protocol_version,omitempty"`
+	OrgID                    string            `json:"org_id"`
+	ProductID                string            `json:"product_id"`
+	AccountID                string            `json:"account_id"`
+	Provider                 string            `json:"provider"`
+	IdempotencyKey           string            `json:"idempotency_key"`
+	HoldbackUntil            time.Time         `json:"holdback_until,omitempty"`
+	ExternalSettlementRoutes map[string]string `json:"external_settlement_routes,omitempty"`
+}
+
+func (r SettlementPayoutRequest) Validate() error {
+	var errs []error
+	if r.ProtocolVersion != "" && r.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "org_id", value: r.OrgID},
+		{name: "account_id", value: r.AccountID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := validateNetworkProductID(r.ProductID); err != nil {
+		errs = append(errs, fmt.Errorf("product_id: %w", err))
+	}
+	if err := validateIdentifier("provider", r.Provider); err != nil {
+		errs = append(errs, err)
+	}
+	if strings.TrimSpace(r.IdempotencyKey) == "" {
+		errs = append(errs, errors.New("idempotency_key is required"))
+	} else {
+		if r.IdempotencyKey != strings.TrimSpace(r.IdempotencyKey) {
+			errs = append(errs, errors.New("idempotency_key must not contain leading or trailing whitespace"))
+		}
+		if strings.ContainsAny(r.IdempotencyKey, "\r\n\t\x00") {
+			errs = append(errs, errors.New("idempotency_key must not contain control whitespace"))
+		}
+	}
+	for accountID, routeID := range r.ExternalSettlementRoutes {
+		if err := validateIdentifier("external_settlement_routes account_id", accountID); err != nil {
+			errs = append(errs, err)
+		}
+		if err := validateIdentifier("external_settlement_routes route_id", routeID); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+type SuspensionScope string
+
+const (
+	SuspensionProduct   SuspensionScope = "product"
+	SuspensionRequestor SuspensionScope = "requestor"
+	SuspensionProvider  SuspensionScope = "provider"
+)
+
+type SuspensionStatus string
+
+const (
+	SuspensionActive SuspensionStatus = "active"
+	SuspensionLifted SuspensionStatus = "lifted"
+)
+
+type MarketplaceSuspension struct {
+	ProtocolVersion string           `json:"protocol_version,omitempty"`
+	ID              string           `json:"id"`
+	OrgID           string           `json:"org_id"`
+	Scope           SuspensionScope  `json:"scope"`
+	SubjectID       string           `json:"subject_id"`
+	ProductID       string           `json:"product_id,omitempty"`
+	Reason          string           `json:"reason"`
+	Status          SuspensionStatus `json:"status"`
+	CreatedAt       time.Time        `json:"created_at,omitempty"`
+	LiftedAt        time.Time        `json:"lifted_at,omitempty"`
+}
+
+func (s MarketplaceSuspension) Validate() error {
+	var errs []error
+	if s.ProtocolVersion != "" && s.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: s.ID},
+		{name: "org_id", value: s.OrgID},
+		{name: "subject_id", value: s.SubjectID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.ProductID != "" {
+		if err := validateNetworkProductID(s.ProductID); err != nil {
+			errs = append(errs, fmt.Errorf("product_id: %w", err))
+		}
+	}
+	if strings.TrimSpace(s.Reason) == "" {
+		errs = append(errs, errors.New("reason is required"))
+	}
+	switch s.Scope {
+	case SuspensionProduct:
+		if s.ProductID == "" {
+			errs = append(errs, errors.New("product_id is required for product suspension"))
+		}
+	case SuspensionRequestor, SuspensionProvider:
+	case "":
+		errs = append(errs, errors.New("scope is required"))
+	default:
+		errs = append(errs, fmt.Errorf("scope %q is unsupported", s.Scope))
+	}
+	switch s.Status {
+	case SuspensionActive:
+		if !s.LiftedAt.IsZero() {
+			errs = append(errs, errors.New("lifted_at must be empty for active suspension"))
+		}
+	case SuspensionLifted:
+		if s.LiftedAt.IsZero() {
+			errs = append(errs, errors.New("lifted_at is required for lifted suspension"))
+		}
+	case "":
+		errs = append(errs, errors.New("status is required"))
+	default:
+		errs = append(errs, fmt.Errorf("status %q is unsupported", s.Status))
+	}
+	return errors.Join(errs...)
+}
+
+type MarketplaceOperatorPolicy struct {
+	ProtocolVersion         string    `json:"protocol_version,omitempty"`
+	ID                      string    `json:"id,omitempty"`
+	Enabled                 bool      `json:"enabled"`
+	Version                 int       `json:"version,omitempty"`
+	OperatorID              string    `json:"operator_id,omitempty"`
+	AllowedOrgIDs           []string  `json:"allowed_org_ids,omitempty"`
+	AllowedProductIDs       []string  `json:"allowed_product_ids,omitempty"`
+	TrustedFederationKeyIDs []string  `json:"trusted_federation_key_ids,omitempty"`
+	CreatedAt               time.Time `json:"created_at,omitempty"`
+	UpdatedAt               time.Time `json:"updated_at,omitempty"`
+}
+
+func (p MarketplaceOperatorPolicy) Validate() error {
+	var errs []error
+	if p.ProtocolVersion != "" && p.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if !p.Enabled {
+		return errors.Join(errs...)
+	}
+	if p.Version <= 0 {
+		errs = append(errs, errors.New("version must be positive when enabled"))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: p.ID},
+		{name: "operator_id", value: p.OperatorID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(p.AllowedOrgIDs) == 0 {
+		errs = append(errs, errors.New("allowed_org_ids is required when enabled"))
+	}
+	seenOrgIDs := map[string]struct{}{}
+	for i, orgID := range p.AllowedOrgIDs {
+		if err := validateIdentifier(fmt.Sprintf("allowed_org_ids[%d]", i), orgID); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, ok := seenOrgIDs[orgID]; ok {
+			errs = append(errs, fmt.Errorf("allowed_org_ids[%d] %q is duplicated", i, orgID))
+		}
+		seenOrgIDs[orgID] = struct{}{}
+	}
+	if len(p.AllowedProductIDs) == 0 {
+		errs = append(errs, errors.New("allowed_product_ids is required when enabled"))
+	}
+	seenProductIDs := map[string]struct{}{}
+	for i, productID := range p.AllowedProductIDs {
+		if err := validateNetworkProductID(productID); err != nil {
+			errs = append(errs, fmt.Errorf("allowed_product_ids[%d]: %w", i, err))
+			continue
+		}
+		if _, ok := seenProductIDs[productID]; ok {
+			errs = append(errs, fmt.Errorf("allowed_product_ids[%d] %q is duplicated", i, productID))
+		}
+		seenProductIDs[productID] = struct{}{}
+	}
+	if len(p.TrustedFederationKeyIDs) == 0 {
+		errs = append(errs, errors.New("trusted_federation_key_ids is required when enabled"))
+	}
+	seenKeyIDs := map[string]struct{}{}
+	for i, keyID := range p.TrustedFederationKeyIDs {
+		if err := validateIdentifier(fmt.Sprintf("trusted_federation_key_ids[%d]", i), keyID); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, ok := seenKeyIDs[keyID]; ok {
+			errs = append(errs, fmt.Errorf("trusted_federation_key_ids[%d] %q is duplicated", i, keyID))
+		}
+		seenKeyIDs[keyID] = struct{}{}
+	}
+	return errors.Join(errs...)
+}
+
+type MarketplaceTrustRootRotationRequest struct {
+	ProtocolVersion               string   `json:"protocol_version,omitempty"`
+	AddTrustedFederationKeyIDs    []string `json:"add_trusted_federation_key_ids,omitempty"`
+	RemoveTrustedFederationKeyIDs []string `json:"remove_trusted_federation_key_ids,omitempty"`
+	RequireCurrentVersion         int      `json:"require_current_version,omitempty"`
+	Reason                        string   `json:"reason,omitempty"`
+}
+
+func (r MarketplaceTrustRootRotationRequest) Validate() error {
+	var errs []error
+	if r.ProtocolVersion != "" && r.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if len(r.AddTrustedFederationKeyIDs) == 0 && len(r.RemoveTrustedFederationKeyIDs) == 0 {
+		errs = append(errs, errors.New("add_trusted_federation_key_ids or remove_trusted_federation_key_ids is required"))
+	}
+	seen := map[string]string{}
+	for i, keyID := range r.AddTrustedFederationKeyIDs {
+		if err := validateIdentifier(fmt.Sprintf("add_trusted_federation_key_ids[%d]", i), keyID); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if seen[keyID] == "add" {
+			errs = append(errs, fmt.Errorf("add_trusted_federation_key_ids[%d] %q is duplicated", i, keyID))
+		}
+		seen[keyID] = "add"
+	}
+	for i, keyID := range r.RemoveTrustedFederationKeyIDs {
+		if err := validateIdentifier(fmt.Sprintf("remove_trusted_federation_key_ids[%d]", i), keyID); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if seen[keyID] == "remove" {
+			errs = append(errs, fmt.Errorf("remove_trusted_federation_key_ids[%d] %q is duplicated", i, keyID))
+		}
+		if seen[keyID] == "add" {
+			errs = append(errs, fmt.Errorf("trusted federation key %q cannot be both added and removed", keyID))
+		}
+		seen[keyID] = "remove"
+	}
+	if r.RequireCurrentVersion < 0 {
+		errs = append(errs, errors.New("require_current_version cannot be negative"))
+	}
+	if strings.TrimSpace(r.Reason) == "" {
+		errs = append(errs, errors.New("reason is required"))
+	}
+	return errors.Join(errs...)
+}
+
+type MarketplaceOperationsPolicy struct {
+	ProtocolVersion      string    `json:"protocol_version,omitempty"`
+	ID                   string    `json:"id,omitempty"`
+	Enabled              bool      `json:"enabled"`
+	Version              int       `json:"version,omitempty"`
+	TermsVersion         string    `json:"terms_version,omitempty"`
+	RewardPolicyVersion  string    `json:"reward_policy_version,omitempty"`
+	DisputeWindowHours   int       `json:"dispute_window_hours,omitempty"`
+	AbuseContact         string    `json:"abuse_contact,omitempty"`
+	PayoutProvider       string    `json:"payout_provider,omitempty"`
+	ActivePayoutKeyID    string    `json:"active_payout_key_id,omitempty"`
+	PreviousPayoutKeyIDs []string  `json:"previous_payout_key_ids,omitempty"`
+	CreatedAt            time.Time `json:"created_at,omitempty"`
+	UpdatedAt            time.Time `json:"updated_at,omitempty"`
+}
+
+func (p MarketplaceOperationsPolicy) Validate() error {
+	var errs []error
+	if p.ProtocolVersion != "" && p.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if !p.Enabled {
+		return errors.Join(errs...)
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: p.ID},
+		{name: "payout_provider", value: p.PayoutProvider},
+		{name: "active_payout_key_id", value: p.ActivePayoutKeyID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "terms_version", value: p.TermsVersion},
+		{name: "reward_policy_version", value: p.RewardPolicyVersion},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			errs = append(errs, fmt.Errorf("%s is required when enabled", field.name))
+			continue
+		}
+		if strings.TrimSpace(field.value) != field.value || strings.ContainsAny(field.value, "\r\n\t\x00") {
+			errs = append(errs, fmt.Errorf("%s must not contain leading, trailing, or control whitespace", field.name))
+		}
+	}
+	if p.Version <= 0 {
+		errs = append(errs, errors.New("version must be positive when enabled"))
+	}
+	if p.DisputeWindowHours <= 0 {
+		errs = append(errs, errors.New("dispute_window_hours must be positive when enabled"))
+	}
+	if strings.TrimSpace(p.AbuseContact) == "" {
+		errs = append(errs, errors.New("abuse_contact is required when enabled"))
+	} else if strings.TrimSpace(p.AbuseContact) != p.AbuseContact || strings.ContainsAny(p.AbuseContact, "\r\n\t\x00") {
+		errs = append(errs, errors.New("abuse_contact must not contain leading, trailing, or control whitespace"))
+	}
+	seen := map[string]struct{}{}
+	if p.ActivePayoutKeyID != "" {
+		seen[p.ActivePayoutKeyID] = struct{}{}
+	}
+	for i, keyID := range p.PreviousPayoutKeyIDs {
+		if err := validateIdentifier(fmt.Sprintf("previous_payout_key_ids[%d]", i), keyID); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if _, ok := seen[keyID]; ok {
+			errs = append(errs, fmt.Errorf("previous_payout_key_ids[%d] duplicates active or previous payout key", i))
+		}
+		seen[keyID] = struct{}{}
+	}
+	return errors.Join(errs...)
+}
+
+type MarketplacePayoutKeyRotationRequest struct {
+	ProtocolVersion       string `json:"protocol_version,omitempty"`
+	NewPayoutKeyID        string `json:"new_payout_key_id"`
+	RequireCurrentVersion int    `json:"require_current_version,omitempty"`
+	Reason                string `json:"reason,omitempty"`
+}
+
+func (r MarketplacePayoutKeyRotationRequest) Validate() error {
+	var errs []error
+	if r.ProtocolVersion != "" && r.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	if err := validateIdentifier("new_payout_key_id", r.NewPayoutKeyID); err != nil {
+		errs = append(errs, err)
+	}
+	if r.RequireCurrentVersion < 0 {
+		errs = append(errs, errors.New("require_current_version cannot be negative"))
+	}
+	if strings.TrimSpace(r.Reason) == "" {
+		errs = append(errs, errors.New("reason is required"))
+	}
+	return errors.Join(errs...)
+}
+
+type ReputationSubjectKind string
+
+const (
+	ReputationSubjectProvider  ReputationSubjectKind = "provider"
+	ReputationSubjectRequestor ReputationSubjectKind = "requestor"
+	ReputationSubjectRouter    ReputationSubjectKind = "router"
+	ReputationSubjectVerifier  ReputationSubjectKind = "verifier"
+)
+
+type ReputationEventType string
+
+const (
+	ReputationProofAccepted       ReputationEventType = "proof_accepted"
+	ReputationProofRejected       ReputationEventType = "proof_rejected"
+	ReputationDisputeWon          ReputationEventType = "dispute_won"
+	ReputationDisputeLost         ReputationEventType = "dispute_lost"
+	ReputationKillComplied        ReputationEventType = "kill_complied"
+	ReputationKillIgnored         ReputationEventType = "kill_ignored"
+	ReputationPolicyViolation     ReputationEventType = "policy_violation"
+	ReputationManualAdjustment    ReputationEventType = "manual_adjustment"
+	ReputationAvailabilityPenalty ReputationEventType = "availability_penalty"
+)
+
+type ReputationEvent struct {
+	ProtocolVersion string                `json:"protocol_version,omitempty"`
+	ID              string                `json:"id"`
+	OrgID           string                `json:"org_id"`
+	SubjectKind     ReputationSubjectKind `json:"subject_kind"`
+	SubjectID       string                `json:"subject_id"`
+	ProductID       string                `json:"product_id,omitempty"`
+	TaskID          string                `json:"task_id,omitempty"`
+	ProofID         string                `json:"proof_id,omitempty"`
+	Type            ReputationEventType   `json:"type"`
+	ScoreDelta      int                   `json:"score_delta"`
+	Reason          string                `json:"reason"`
+	RecordedAt      time.Time             `json:"recorded_at,omitempty"`
+}
+
+func (e ReputationEvent) Validate() error {
+	var errs []error
+	if e.ProtocolVersion != "" && e.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: e.ID},
+		{name: "org_id", value: e.OrgID},
+		{name: "subject_id", value: e.SubjectID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := validateReputationSubjectKind(e.SubjectKind); err != nil {
+		errs = append(errs, err)
+	}
+	switch e.Type {
+	case ReputationProofAccepted, ReputationProofRejected, ReputationDisputeWon, ReputationDisputeLost, ReputationKillComplied, ReputationKillIgnored, ReputationPolicyViolation, ReputationManualAdjustment, ReputationAvailabilityPenalty:
+	case "":
+		errs = append(errs, errors.New("type is required"))
+	default:
+		errs = append(errs, fmt.Errorf("type %q is unsupported", e.Type))
+	}
+	if e.ProductID != "" {
+		if err := validateNetworkProductID(e.ProductID); err != nil {
+			errs = append(errs, fmt.Errorf("product_id: %w", err))
+		}
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "task_id", value: e.TaskID},
+		{name: "proof_id", value: e.ProofID},
+	} {
+		if field.value == "" {
+			continue
+		}
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if e.ScoreDelta == 0 {
+		errs = append(errs, errors.New("score_delta must be non-zero"))
+	}
+	if e.ScoreDelta < -1000 || e.ScoreDelta > 1000 {
+		errs = append(errs, errors.New("score_delta must be between -1000 and 1000"))
+	}
+	if strings.TrimSpace(e.Reason) == "" {
+		errs = append(errs, errors.New("reason is required"))
+	}
+	return errors.Join(errs...)
+}
+
+type ReputationSummary struct {
+	OrgID       string                `json:"org_id"`
+	SubjectKind ReputationSubjectKind `json:"subject_kind"`
+	SubjectID   string                `json:"subject_id"`
+	ProductID   string                `json:"product_id,omitempty"`
+	Score       int                   `json:"score"`
+	EventCount  int                   `json:"event_count"`
+}
+
+func (s ReputationSummary) Validate() error {
+	var errs []error
+	if err := validateIdentifier("org_id", s.OrgID); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateReputationSubjectKind(s.SubjectKind); err != nil {
+		errs = append(errs, err)
+	}
+	if err := validateIdentifier("subject_id", s.SubjectID); err != nil {
+		errs = append(errs, err)
+	}
+	if s.ProductID != "" {
+		if err := validateNetworkProductID(s.ProductID); err != nil {
+			errs = append(errs, fmt.Errorf("product_id: %w", err))
+		}
+	}
+	if s.EventCount < 0 {
+		errs = append(errs, errors.New("event_count must not be negative"))
+	}
+	if s.Score < -1_000_000 || s.Score > 1_000_000 {
+		errs = append(errs, errors.New("score must be between -1000000 and 1000000"))
+	}
+	return errors.Join(errs...)
+}
+
+func validateReputationSubjectKind(kind ReputationSubjectKind) error {
+	switch kind {
+	case ReputationSubjectProvider, ReputationSubjectRequestor, ReputationSubjectRouter, ReputationSubjectVerifier:
+		return nil
+	case "":
+		return errors.New("subject_kind is required")
+	default:
+		return fmt.Errorf("subject_kind %q is unsupported", kind)
+	}
+}
+
+type MarketplaceAbuseSubjectKind string
+
+const (
+	MarketplaceAbuseSubjectProduct   MarketplaceAbuseSubjectKind = "product"
+	MarketplaceAbuseSubjectRequestor MarketplaceAbuseSubjectKind = "requestor"
+	MarketplaceAbuseSubjectProvider  MarketplaceAbuseSubjectKind = "provider"
+	MarketplaceAbuseSubjectRouter    MarketplaceAbuseSubjectKind = "router"
+	MarketplaceAbuseSubjectVerifier  MarketplaceAbuseSubjectKind = "verifier"
+)
+
+type MarketplaceAbuseSeverity string
+
+const (
+	MarketplaceAbuseSeverityLow      MarketplaceAbuseSeverity = "low"
+	MarketplaceAbuseSeverityMedium   MarketplaceAbuseSeverity = "medium"
+	MarketplaceAbuseSeverityHigh     MarketplaceAbuseSeverity = "high"
+	MarketplaceAbuseSeverityCritical MarketplaceAbuseSeverity = "critical"
+)
+
+type MarketplaceAbuseStatus string
+
+const (
+	MarketplaceAbuseStatusOpen      MarketplaceAbuseStatus = "open"
+	MarketplaceAbuseStatusInReview  MarketplaceAbuseStatus = "in_review"
+	MarketplaceAbuseStatusActioned  MarketplaceAbuseStatus = "actioned"
+	MarketplaceAbuseStatusDismissed MarketplaceAbuseStatus = "dismissed"
+	MarketplaceAbuseStatusResolved  MarketplaceAbuseStatus = "resolved"
+)
+
+type MarketplaceAbuseEvidenceRef struct {
+	Ref    string `json:"ref"`
+	Digest string `json:"digest,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+type MarketplaceAbuseCase struct {
+	ProtocolVersion string                        `json:"protocol_version,omitempty"`
+	ID              string                        `json:"id"`
+	OrgID           string                        `json:"org_id"`
+	ProductID       string                        `json:"product_id,omitempty"`
+	SubjectKind     MarketplaceAbuseSubjectKind   `json:"subject_kind"`
+	SubjectID       string                        `json:"subject_id"`
+	Severity        MarketplaceAbuseSeverity      `json:"severity"`
+	Status          MarketplaceAbuseStatus        `json:"status"`
+	Reason          string                        `json:"reason"`
+	EvidenceRefs    []MarketplaceAbuseEvidenceRef `json:"evidence_refs,omitempty"`
+	TaskID          string                        `json:"task_id,omitempty"`
+	ProofID         string                        `json:"proof_id,omitempty"`
+	RouteRef        string                        `json:"route_ref,omitempty"`
+	CreatedAt       time.Time                     `json:"created_at,omitempty"`
+	UpdatedAt       time.Time                     `json:"updated_at,omitempty"`
+	ResolvedAt      time.Time                     `json:"resolved_at,omitempty"`
+}
+
+func (c MarketplaceAbuseCase) Validate() error {
+	var errs []error
+	if c.ProtocolVersion != "" && c.ProtocolVersion != Version {
+		errs = append(errs, fmt.Errorf("protocol_version must be %q", Version))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "id", value: c.ID},
+		{name: "org_id", value: c.OrgID},
+		{name: "subject_id", value: c.SubjectID},
+	} {
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.ProductID != "" {
+		if err := validateNetworkProductID(c.ProductID); err != nil {
+			errs = append(errs, fmt.Errorf("product_id: %w", err))
+		}
+	}
+	switch c.SubjectKind {
+	case MarketplaceAbuseSubjectProduct:
+		if c.ProductID == "" {
+			errs = append(errs, errors.New("product_id is required for product abuse case"))
+		}
+	case MarketplaceAbuseSubjectRequestor, MarketplaceAbuseSubjectProvider, MarketplaceAbuseSubjectRouter, MarketplaceAbuseSubjectVerifier:
+	case "":
+		errs = append(errs, errors.New("subject_kind is required"))
+	default:
+		errs = append(errs, fmt.Errorf("subject_kind %q is unsupported", c.SubjectKind))
+	}
+	switch c.Severity {
+	case MarketplaceAbuseSeverityLow, MarketplaceAbuseSeverityMedium, MarketplaceAbuseSeverityHigh, MarketplaceAbuseSeverityCritical:
+	case "":
+		errs = append(errs, errors.New("severity is required"))
+	default:
+		errs = append(errs, fmt.Errorf("severity %q is unsupported", c.Severity))
+	}
+	switch c.Status {
+	case MarketplaceAbuseStatusOpen, MarketplaceAbuseStatusInReview, MarketplaceAbuseStatusActioned:
+		if !c.ResolvedAt.IsZero() {
+			errs = append(errs, errors.New("resolved_at must be empty before terminal status"))
+		}
+	case MarketplaceAbuseStatusDismissed, MarketplaceAbuseStatusResolved:
+		if c.ResolvedAt.IsZero() {
+			errs = append(errs, errors.New("resolved_at is required for terminal status"))
+		}
+	case "":
+		errs = append(errs, errors.New("status is required"))
+	default:
+		errs = append(errs, fmt.Errorf("status %q is unsupported", c.Status))
+	}
+	if strings.TrimSpace(c.Reason) == "" {
+		errs = append(errs, errors.New("reason is required"))
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "task_id", value: c.TaskID},
+		{name: "proof_id", value: c.ProofID},
+	} {
+		if field.value == "" {
+			continue
+		}
+		if err := validateIdentifier(field.name, field.value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.RouteRef != "" {
+		if err := validateMarketplaceEvidenceRef("route_ref", c.RouteRef); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for i, ref := range c.EvidenceRefs {
+		if err := ref.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("evidence_refs[%d]: %w", i, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r MarketplaceAbuseEvidenceRef) Validate() error {
+	var errs []error
+	if err := validateMarketplaceEvidenceRef("ref", r.Ref); err != nil {
+		errs = append(errs, err)
+	}
+	if r.Digest != "" && !validSHA256Ref(r.Digest) {
+		errs = append(errs, errors.New("digest must be sha256:<64 hex chars>"))
+	}
+	if strings.ContainsAny(r.Note, "\r\n\t\x00") {
+		errs = append(errs, errors.New("note must not contain control whitespace"))
+	}
+	return errors.Join(errs...)
+}
+
+func validateMarketplaceEvidenceRef(name, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if strings.TrimSpace(value) != value {
+		return fmt.Errorf("%s must not contain leading or trailing whitespace", name)
+	}
+	if strings.ContainsAny(value, " \t\r\n\x00?&#") {
+		return fmt.Errorf("%s must not contain whitespace, query, fragment, or parameter delimiters", name)
+	}
+	if containsSecretLikeValue(value) {
+		return fmt.Errorf("%s must not contain raw secret-looking values", name)
+	}
+	for _, scheme := range []string{"artifact://", "audit://", "proof://", "task://", "route://"} {
+		if !strings.HasPrefix(value, scheme) {
+			continue
+		}
+		return validateScopedRef(name, value, scheme)
+	}
+	return fmt.Errorf("%s must use artifact://, audit://, proof://, task://, or route:// scoped ref", name)
+}
+
+func containsSecretLikeValue(value string) bool {
+	upper := strings.ToUpper(value)
+	for _, marker := range []string{
+		"SECRET",
+		"PRIVATE_KEY",
+		"ACCESS_KEY",
+		"AUTHORIZATION",
+		"BEARER",
+		"TOKEN=",
+		"PASSWORD=",
+		"CLIENT_SECRET",
+	} {
+		if strings.Contains(upper, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
