@@ -2414,6 +2414,245 @@ func TestProviderContractAppliesProviderConformanceEvidence(t *testing.T) {
 	}
 }
 
+func TestMarketplaceOperationsContractsValidate(t *testing.T) {
+	now := time.Now().UTC()
+	hold := protocol.SettlementHold{
+		ProtocolVersion:     protocol.Version,
+		ID:                  "hold-1",
+		OrgID:               "org-1",
+		ProductID:           "capture-product",
+		AccountID:           "acct-1",
+		ContributionEventID: "contribution-1",
+		Reason:              "dispute window",
+		Status:              protocol.SettlementHoldPending,
+		HoldUntil:           now.Add(24 * time.Hour),
+		CreatedAt:           now,
+	}
+	if err := hold.Validate(); err != nil {
+		t.Fatalf("settlement hold invalid: %v", err)
+	}
+
+	payout := protocol.SettlementPayoutRequest{
+		ProtocolVersion: protocol.Version,
+		OrgID:           "org-1",
+		ProductID:       "capture-product",
+		AccountID:       "acct-1",
+		Provider:        "stripe",
+		IdempotencyKey:  "payout-1",
+		HoldbackUntil:   now.Add(48 * time.Hour),
+		ExternalSettlementRoutes: map[string]string{
+			"acct-1": "route-1",
+		},
+	}
+	if err := payout.Validate(); err != nil {
+		t.Fatalf("payout request invalid: %v", err)
+	}
+
+	suspension := protocol.MarketplaceSuspension{
+		ProtocolVersion: protocol.Version,
+		ID:              "suspension-1",
+		OrgID:           "org-1",
+		Scope:           protocol.SuspensionProvider,
+		SubjectID:       "provider-1",
+		ProductID:       "capture-product",
+		Reason:          "abuse investigation",
+		Status:          protocol.SuspensionActive,
+		CreatedAt:       now,
+	}
+	if err := suspension.Validate(); err != nil {
+		t.Fatalf("marketplace suspension invalid: %v", err)
+	}
+
+	operatorPolicy := protocol.MarketplaceOperatorPolicy{
+		ProtocolVersion:         protocol.Version,
+		ID:                      "marketplace-ops",
+		Enabled:                 true,
+		Version:                 1,
+		OperatorID:              "operator-1",
+		AllowedOrgIDs:           []string{"org-1"},
+		AllowedProductIDs:       []string{"capture-product"},
+		TrustedFederationKeyIDs: []string{"federation-key-1"},
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+	if err := operatorPolicy.Validate(); err != nil {
+		t.Fatalf("operator policy invalid: %v", err)
+	}
+
+	opsPolicy := protocol.MarketplaceOperationsPolicy{
+		ProtocolVersion:      protocol.Version,
+		ID:                   "marketplace-ops",
+		Enabled:              true,
+		Version:              1,
+		TermsVersion:         "terms-v1",
+		RewardPolicyVersion:  "rewards-v1",
+		DisputeWindowHours:   72,
+		AbuseContact:         "abuse@example.invalid",
+		PayoutProvider:       "stripe",
+		ActivePayoutKeyID:    "payout-key-1",
+		PreviousPayoutKeyIDs: []string{"payout-key-0"},
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	if err := opsPolicy.Validate(); err != nil {
+		t.Fatalf("operations policy invalid: %v", err)
+	}
+
+	payoutRotation := protocol.MarketplacePayoutKeyRotationRequest{
+		ProtocolVersion:       protocol.Version,
+		NewPayoutKeyID:        "payout-key-2",
+		RequireCurrentVersion: 1,
+		Reason:                "quarterly rotation",
+	}
+	if err := payoutRotation.Validate(); err != nil {
+		t.Fatalf("payout rotation invalid: %v", err)
+	}
+
+	trustRotation := protocol.MarketplaceTrustRootRotationRequest{
+		ProtocolVersion:            protocol.Version,
+		AddTrustedFederationKeyIDs: []string{"federation-key-2"},
+		RequireCurrentVersion:      1,
+		Reason:                     "new operator signing key",
+	}
+	if err := trustRotation.Validate(); err != nil {
+		t.Fatalf("trust rotation invalid: %v", err)
+	}
+
+	reputationEvent := protocol.ReputationEvent{
+		ProtocolVersion: protocol.Version,
+		ID:              "rep-event-1",
+		OrgID:           "org-1",
+		SubjectKind:     protocol.ReputationSubjectProvider,
+		SubjectID:       "provider-1",
+		ProductID:       "capture-product",
+		TaskID:          "task-1",
+		ProofID:         "proof-1",
+		Type:            protocol.ReputationProofAccepted,
+		ScoreDelta:      5,
+		Reason:          "accepted proof",
+		RecordedAt:      now,
+	}
+	if err := reputationEvent.Validate(); err != nil {
+		t.Fatalf("reputation event invalid: %v", err)
+	}
+
+	reputationSummary := protocol.ReputationSummary{
+		OrgID:       "org-1",
+		SubjectKind: protocol.ReputationSubjectProvider,
+		SubjectID:   "provider-1",
+		ProductID:   "capture-product",
+		Score:       25,
+		EventCount:  5,
+	}
+	if err := reputationSummary.Validate(); err != nil {
+		t.Fatalf("reputation summary invalid: %v", err)
+	}
+
+	abuseCase := validMarketplaceAbuseCase(now)
+	if err := abuseCase.Validate(); err != nil {
+		t.Fatalf("abuse case invalid: %v", err)
+	}
+}
+
+func TestMarketplaceAbuseCaseRejectsUnsafeEvidenceRefs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ref  string
+	}{
+		{name: "secret ref", ref: "secret://providers/token"},
+		{name: "http ref", ref: "https://example.invalid/evidence"},
+		{name: "query string", ref: "artifact://abuse/case-1?token=secret"},
+		{name: "parent traversal", ref: "audit://../other-org/case"},
+		{name: "raw secret", ref: "AWS_SECRET_ACCESS_KEY=not-for-contracts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			abuseCase := validMarketplaceAbuseCase(time.Now().UTC())
+			abuseCase.EvidenceRefs = []protocol.MarketplaceAbuseEvidenceRef{{
+				Ref:    tc.ref,
+				Digest: protocol.CanonicalHash("evidence"),
+			}}
+			err := abuseCase.Validate()
+			if err == nil {
+				t.Fatal("expected unsafe evidence ref to fail")
+			}
+			if !strings.Contains(err.Error(), "evidence_refs") {
+				t.Fatalf("expected evidence_refs error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestMarketplacePoliciesRejectMalformedRotations(t *testing.T) {
+	opsPolicy := protocol.MarketplaceOperationsPolicy{
+		ProtocolVersion:      protocol.Version,
+		ID:                   "marketplace-ops",
+		Enabled:              true,
+		Version:              1,
+		TermsVersion:         "terms-v1",
+		RewardPolicyVersion:  "rewards-v1",
+		DisputeWindowHours:   72,
+		AbuseContact:         "abuse@example.invalid",
+		PayoutProvider:       "stripe",
+		ActivePayoutKeyID:    "payout-key-1",
+		PreviousPayoutKeyIDs: []string{"payout-key-1"},
+	}
+	if err := opsPolicy.Validate(); err == nil || !strings.Contains(err.Error(), "duplicates active") {
+		t.Fatalf("expected duplicate payout key rejection, got %v", err)
+	}
+
+	payoutRotation := protocol.MarketplacePayoutKeyRotationRequest{
+		ProtocolVersion:       protocol.Version,
+		NewPayoutKeyID:        "bad/key",
+		RequireCurrentVersion: -1,
+	}
+	if err := payoutRotation.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "new_payout_key_id") ||
+		!strings.Contains(err.Error(), "require_current_version") ||
+		!strings.Contains(err.Error(), "reason") {
+		t.Fatalf("expected malformed payout rotation rejection, got %v", err)
+	}
+
+	trustRotation := protocol.MarketplaceTrustRootRotationRequest{
+		ProtocolVersion:               protocol.Version,
+		AddTrustedFederationKeyIDs:    []string{"federation-key-1", "federation-key-1"},
+		RemoveTrustedFederationKeyIDs: []string{"federation-key-1"},
+		Reason:                        "rotate",
+	}
+	if err := trustRotation.Validate(); err == nil ||
+		!strings.Contains(err.Error(), "duplicated") ||
+		!strings.Contains(err.Error(), "cannot be both added and removed") {
+		t.Fatalf("expected malformed trust rotation rejection, got %v", err)
+	}
+
+	reputationEvent := protocol.ReputationEvent{
+		ProtocolVersion: protocol.Version,
+		ID:              "rep-event-1",
+		OrgID:           "org-1",
+		SubjectKind:     protocol.ReputationSubjectProvider,
+		SubjectID:       "provider-1",
+		Type:            protocol.ReputationManualAdjustment,
+		Reason:          "manual adjustment",
+	}
+	if err := reputationEvent.Validate(); err == nil || !strings.Contains(err.Error(), "score_delta") {
+		t.Fatalf("expected zero reputation delta rejection, got %v", err)
+	}
+}
+
+func TestMarketplaceContractsRejectMissingScopeIdentifiers(t *testing.T) {
+	payout := protocol.SettlementPayoutRequest{
+		ProtocolVersion: protocol.Version,
+		Provider:        "stripe",
+		IdempotencyKey:  "payout-1",
+	}
+	err := payout.Validate()
+	if err == nil ||
+		!strings.Contains(err.Error(), "org_id") ||
+		!strings.Contains(err.Error(), "product_id") ||
+		!strings.Contains(err.Error(), "account_id") {
+		t.Fatalf("expected missing payout scope identifiers rejection, got %v", err)
+	}
+}
+
 func TestDefaultProviderRuntimeContractBuildsRuntimeMatrix(t *testing.T) {
 	contract := protocol.DefaultProviderRuntimeContract(
 		[]string{"sandboxed-command", "service-sandboxed-container"},
@@ -2558,6 +2797,30 @@ func TestDefaultProviderRuntimeProfileMatchesKnownExecutorShapes(t *testing.T) {
 				t.Fatalf("writable paths = %+v, want %+v", profile.WritablePaths, tc.writablePaths)
 			}
 		})
+	}
+}
+
+func validMarketplaceAbuseCase(now time.Time) protocol.MarketplaceAbuseCase {
+	return protocol.MarketplaceAbuseCase{
+		ProtocolVersion: protocol.Version,
+		ID:              "abuse-case-1",
+		OrgID:           "org-1",
+		ProductID:       "capture-product",
+		SubjectKind:     protocol.MarketplaceAbuseSubjectProvider,
+		SubjectID:       "provider-1",
+		Severity:        protocol.MarketplaceAbuseSeverityHigh,
+		Status:          protocol.MarketplaceAbuseStatusOpen,
+		Reason:          "unsafe output",
+		TaskID:          "task-1",
+		ProofID:         "proof-1",
+		RouteRef:        "route://marketplace/capture-product/task-1",
+		EvidenceRefs: []protocol.MarketplaceAbuseEvidenceRef{{
+			Ref:    "artifact://abuse/case-1/redacted-proof",
+			Digest: protocol.CanonicalHash("redacted-proof"),
+			Note:   "redacted proof bundle",
+		}},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 }
 
