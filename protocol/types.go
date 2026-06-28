@@ -52,6 +52,8 @@ const (
 	WorkloadProductCapture     WorkloadKind = "product-capture"
 	WorkloadProvider           WorkloadKind = "provider"
 	WorkloadWASMComponent      WorkloadKind = "wasm-component"
+	WorkloadVideoStream        WorkloadKind = "video-stream"
+	WorkloadMediaTransform     WorkloadKind = "media-transform"
 )
 
 type RuntimeProfile string
@@ -6402,7 +6404,9 @@ func validWorkloadKind(kind WorkloadKind) bool {
 		WorkloadSupervisor,
 		WorkloadProductCapture,
 		WorkloadProvider,
-		WorkloadWASMComponent:
+		WorkloadWASMComponent,
+		WorkloadVideoStream,
+		WorkloadMediaTransform:
 		return true
 	default:
 		return false
