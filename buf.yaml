@@ -4,6 +4,18 @@ modules:
 lint:
   use:
     - STANDARD
+  # RuntimeProviderService intentionally uses idiomatic gRPC streaming response
+  # names (RunEvent/SessionEvent) and a shared SessionHandle (StartSession
+  # response == SessionEvents request: the handle identifies the session). These
+  # are deliberate contract shapes, so the STANDARD RPC-naming/uniqueness rules
+  # are suppressed for this file only.
+  ignore_only:
+    RPC_RESPONSE_STANDARD_NAME:
+      - proto/workflow_plugin_compute_core/protocol/v1/runtime_provider.proto
+    RPC_REQUEST_STANDARD_NAME:
+      - proto/workflow_plugin_compute_core/protocol/v1/runtime_provider.proto
+    RPC_REQUEST_RESPONSE_UNIQUE:
+      - proto/workflow_plugin_compute_core/protocol/v1/runtime_provider.proto
 breaking:
   use:
     - FILE

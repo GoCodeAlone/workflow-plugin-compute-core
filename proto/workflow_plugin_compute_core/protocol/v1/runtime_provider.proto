@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package workflow_plugin_compute_core.protocol.v1;
+
+option go_package = "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb;pb";
+
+// DescribeRequest asks the provider to describe its capabilities.
+message DescribeRequest {}
+
+// ProviderCapabilities describes what a RuntimeProvider can handle.
+message ProviderCapabilities {
+  string provider_id = 1;
+  repeated string workload_kinds = 2;
+  repeated string executor_providers = 3;
+  repeated string runtime_profiles = 4;
+}
+
+// RunRequest initiates a one-shot workload execution.
+// env values may be unresolved secret:// refs — the provider resolves them.
+message RunRequest {
+  string executor_provider = 1;
+  bytes input = 2;
+  map<string, string> env = 3;
+  string task_id = 4;
+  string lease_id = 5;
+}
+
+// RunEvent is a streaming chunk emitted during RunRequest execution.
+message RunEvent {
+  oneof event {
+    bytes stdout = 1;
+    bytes stderr = 2;
+    RunResult terminal = 3;
+  }
+}
+
+// RunResult is the terminal outcome of a RunRequest.
+message RunResult {
+  int32 exit_code = 1;
+  string artifact_hash = 2;
+  repeated string artifacts = 3;
+}
+
+// StartSessionRequest initiates a long-lived session.
+// env values may be unresolved secret:// refs — the provider resolves them.
+message StartSessionRequest {
+  string executor_provider = 1;
+  bytes input = 2;
+  map<string, string> env = 3;
+  string task_id = 4;
+  string lease_id = 5;
+}
+
+// SessionHandle identifies a running session.
+message SessionHandle {
+  string session_id = 1;
+}
+
+// SessionEvent is an event emitted by a running session.
+// evidence is unsigned — the host signs it later.
+message SessionEvent {
+  string event_type = 1;
+  bytes evidence = 2;
+  int64 ts_unix_nanos = 3;
+}
+
+// ControlSessionRequest sends a control action to a running session.
+// action examples: health, renew, stop, mutate.
+message ControlSessionRequest {
+  string session_id = 1;
+  string action = 2;
+  bytes payload = 3;
+}
+
+// ControlSessionResponse is the reply to a ControlSessionRequest.
+message ControlSessionResponse {
+  bool healthy = 1;
+  string message = 2;
+}
+
+// RuntimeProviderService is the gRPC interface that all compute runtime
+// providers must implement.
+service RuntimeProviderService {
+  rpc Describe(DescribeRequest) returns (ProviderCapabilities);
+  rpc Run(RunRequest) returns (stream RunEvent);
+  rpc StartSession(StartSessionRequest) returns (SessionHandle);
+  rpc SessionEvents(SessionHandle) returns (stream SessionEvent);
+  rpc ControlSession(ControlSessionRequest) returns (ControlSessionResponse);
+}
