@@ -133,12 +133,13 @@ const (
 type ProofTier string
 
 const (
-	ProofReceiptOnly      ProofTier = "receipt-only"
-	ProofArtifactHash     ProofTier = "artifact-hash"
-	ProofReplicatedQuorum ProofTier = "replicated-quorum"
-	ProofAttestedReceipt  ProofTier = "attested-receipt"
-	ProofAttestedQuorum   ProofTier = "attested-quorum"
-	ProofZKReplay         ProofTier = "zk-replay"
+	ProofReceiptOnly           ProofTier = "receipt-only"
+	ProofArtifactHash          ProofTier = "artifact-hash"
+	ProofReplicatedQuorum      ProofTier = "replicated-quorum"
+	ProofAttestedReceipt       ProofTier = "attested-receipt"
+	ProofAttestedQuorum        ProofTier = "attested-quorum"
+	ProofZKReplay              ProofTier = "zk-replay"
+	ProofStreamSegmentManifest ProofTier = "stream-segment-manifest"
 )
 
 type VerificationStatus string
@@ -6444,7 +6445,8 @@ func validProofTier(tier ProofTier) bool {
 		ProofReplicatedQuorum,
 		ProofAttestedReceipt,
 		ProofAttestedQuorum,
-		ProofZKReplay:
+		ProofZKReplay,
+		ProofStreamSegmentManifest:
 		return true
 	default:
 		return false
