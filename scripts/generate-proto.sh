@@ -13,6 +13,10 @@ if ! command -v protoc-gen-go >/dev/null 2>&1; then
   GOWORK=off go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
 fi
 
+if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then
+  GOWORK=off go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
+fi
+
 buf generate
 mkdir -p descriptors
 tmpdir="$(mktemp -d)"
