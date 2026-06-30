@@ -1146,7 +1146,17 @@ func TestManagedRuntimeBundleDescriptorAcceptsMediaMTXFamily(t *testing.T) {
 	descriptor := validManagedRuntimeBundleDescriptor()
 	descriptor.BundleID = "mediamtx-linux-amd64"
 	descriptor.Family = protocol.RuntimeBackendFamilyMediaMTX
+	descriptor.Tool = ""
+	descriptor.Version = "v1.19.1"
+	descriptor.ArtifactName = "mediamtx_v1.19.1_linux_amd64.tar.gz"
+	descriptor.ChecksumName = "checksums.sha256"
+	descriptor.SignatureName = "checksums.sha256.sig"
+	descriptor.SignatureIssuer = "workflow-plugin-stream-release"
+	descriptor.SignatureKeyID = "workflow-plugin-stream-mediamtx"
+	descriptor.ConformanceProfile = "mediamtx-service-session-v1"
 	descriptor.SignatureSubject.RuntimeFamily = protocol.RuntimeBackendFamilyMediaMTX
+	descriptor.SignatureSubject.Version = "v1.19.1"
+	descriptor.SignatureSubject.ConformanceProfile = "mediamtx-service-session-v1"
 	if err := descriptor.ValidateAt(time.Unix(1_700_000_000, 0).UTC()); err != nil {
 		t.Fatalf("mediamtx descriptor invalid: %v", err)
 	}
