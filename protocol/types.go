@@ -4894,7 +4894,11 @@ func (p NetworkProduct) Validate() error {
 	}
 	switch p.OperatingMode {
 	case NetworkModeBatch:
-	case NetworkModeWarmService, NetworkModeInferenceAPI:
+	case NetworkModeWarmService:
+		if !networkProductAdmitsSessionWorkload(p) {
+			errs = append(errs, fmt.Errorf("operating_mode %q requires service or video-stream workload kind", p.OperatingMode))
+		}
+	case NetworkModeInferenceAPI:
 		if !contains(p.WorkloadKinds, string(WorkloadService)) {
 			errs = append(errs, fmt.Errorf("operating_mode %q requires service workload kind", p.OperatingMode))
 		}
@@ -4990,10 +4994,20 @@ func (p NetworkProduct) Validate() error {
 	return errors.Join(errs...)
 }
 
+func networkProductAdmitsSessionWorkload(p NetworkProduct) bool {
+	for _, kind := range p.WorkloadKinds {
+		switch WorkloadKind(strings.TrimSpace(kind)) {
+		case WorkloadService, WorkloadVideoStream:
+			return true
+		}
+	}
+	return false
+}
+
 func networkProductAdmitsShortLivedResidue(p NetworkProduct) bool {
 	for _, kind := range p.WorkloadKinds {
 		switch WorkloadKind(strings.TrimSpace(kind)) {
-		case WorkloadService, WorkloadNodeService:
+		case WorkloadService, WorkloadNodeService, WorkloadVideoStream:
 			continue
 		default:
 			return true
