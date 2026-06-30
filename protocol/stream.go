@@ -24,7 +24,7 @@ type StreamSpec struct {
 	Destinations    []StreamDestination `json:"destinations,omitempty"`
 	ViewerEgress    ViewerEgressConfig  `json:"viewer_egress,omitempty"`
 	Recording       bool                `json:"recording,omitempty"`
-	RedundancyTier  string              `json:"redundancy_tier,omitempty"`
+	Redundancy      RedundancyPolicy    `json:"redundancy,omitzero"`
 }
 
 // Validate returns an error if the StreamSpec is not well-formed.
@@ -42,6 +42,9 @@ func (s StreamSpec) Validate() error {
 				errs = append(errs, fmt.Errorf("destinations[%d].transform: %w", i, err))
 			}
 		}
+	}
+	if err := s.Redundancy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("redundancy: %w", err))
 	}
 	return errors.Join(errs...)
 }

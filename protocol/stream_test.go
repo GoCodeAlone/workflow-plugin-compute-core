@@ -63,3 +63,15 @@ func TestStreamSpecValidWithTransformPasses(t *testing.T) {
 		t.Fatalf("expected valid StreamSpec with transform to pass, got: %v", err)
 	}
 }
+
+func TestStreamSpecInvalidRedundancyErrors(t *testing.T) {
+	s := protocol.StreamSpec{
+		IngestProtocols: []string{"rtmp"},
+		Redundancy: protocol.RedundancyPolicy{
+			Tier: protocol.RedundancyWarmStandby,
+		},
+	}
+	if err := s.Validate(); err == nil {
+		t.Fatalf("expected invalid redundancy policy to fail")
+	}
+}
