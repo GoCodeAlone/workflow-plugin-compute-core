@@ -2295,6 +2295,12 @@ func TestNetworkProductAcceptsVideoStreamWarmServiceProduct(t *testing.T) {
 		t.Fatalf("video-stream warm-service product invalid: %v", err)
 	}
 
+	trimmedProduct := validVideoStreamWarmServiceProduct()
+	trimmedProduct.WorkloadKinds = []string{" video-stream "}
+	if err := trimmedProduct.Validate(); err != nil {
+		t.Fatalf("video-stream warm-service product with trimmed workload kind invalid: %v", err)
+	}
+
 	contract := validVideoStreamProviderContract()
 	if err := contract.Validate(); err != nil {
 		t.Fatalf("video-stream provider contract invalid: %v", err)

@@ -4995,8 +4995,13 @@ func (p NetworkProduct) Validate() error {
 }
 
 func networkProductAdmitsSessionWorkload(p NetworkProduct) bool {
-	return contains(p.WorkloadKinds, string(WorkloadService)) ||
-		contains(p.WorkloadKinds, string(WorkloadVideoStream))
+	for _, kind := range p.WorkloadKinds {
+		switch WorkloadKind(strings.TrimSpace(kind)) {
+		case WorkloadService, WorkloadVideoStream:
+			return true
+		}
+	}
+	return false
 }
 
 func networkProductAdmitsShortLivedResidue(p NetworkProduct) bool {
