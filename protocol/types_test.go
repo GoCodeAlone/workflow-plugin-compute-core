@@ -2289,6 +2289,21 @@ func TestNetworkProductAcceptsWorkflowComputeProductCompatibilityShape(t *testin
 	}
 }
 
+func TestNetworkProductAcceptsVideoStreamWarmServiceProduct(t *testing.T) {
+	product := validVideoStreamWarmServiceProduct()
+	if err := product.Validate(); err != nil {
+		t.Fatalf("video-stream warm-service product invalid: %v", err)
+	}
+
+	contract := validVideoStreamProviderContract()
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("video-stream provider contract invalid: %v", err)
+	}
+	if err := contract.SupportsProduct(product); err != nil {
+		t.Fatalf("contract should support video-stream warm-service product: %v", err)
+	}
+}
+
 func TestNetworkProductRejectsServiceResiduePolicy(t *testing.T) {
 	product := validBatchNetworkProduct()
 	product.OperatingMode = protocol.NetworkModeWarmService
@@ -2394,6 +2409,71 @@ func validBatchNetworkProduct() protocol.NetworkProduct {
 		AdmissionMode: "open",
 		AllowPublic:   true,
 		CreatedAt:     time.Now().UTC(),
+	}
+}
+
+func validVideoStreamWarmServiceProduct() protocol.NetworkProduct {
+	product := validBatchNetworkProduct()
+	product.ID = "video-stream-product"
+	product.DisplayName = "Video Stream Product"
+	product.Purpose = "live video ingest and multiplexing"
+	product.OperatingMode = protocol.NetworkModeWarmService
+	product.WorkloadKinds = []string{string(protocol.WorkloadVideoStream)}
+	product.SecurityFloor = protocol.PlacementRequirements{
+		ExecutorProvider:      "stream-service-session",
+		ExecutionSecurityTier: protocol.ExecutionHardenedContainer,
+		ProofTier:             protocol.ProofStreamSegmentManifest,
+	}
+	product.ProviderConfig = protocol.ProviderConfig{
+		PluginID:   "workflow-plugin-stream",
+		ProviderID: "video-stream",
+		ContractID: "workflow-plugin-stream.video-stream.v1",
+		Version:    "v0.1.2",
+		ConfigRef:  "config://network-products/video-stream-product/video-stream",
+	}
+	product.NetworkModes = []protocol.NetworkMode{protocol.NetworkModeDirect}
+	product.SessionPolicy = protocol.SessionPolicy{WarmSeconds: 60, MinRenewals: 1, MaxBatchRequests: 1}
+	product.PlacementConstraints = protocol.PlacementConstraints{RequiresIngress: true}
+	product.ResiduePolicy = protocol.ResiduePolicy{}
+	return product
+}
+
+func validVideoStreamProviderContract() protocol.ProviderContract {
+	return protocol.ProviderContract{
+		ProtocolVersion:        protocol.Version,
+		ID:                     "workflow-plugin-stream.video-stream.v1",
+		PluginID:               "workflow-plugin-stream",
+		ProviderID:             "video-stream",
+		ContractID:             "workflow-plugin-stream.video-stream.v1",
+		Version:                "v0.1.2",
+		ConfigSchemaRef:        "schema://providers/workflow-plugin-stream/video-stream/config/v1",
+		ConfigSchemaDigest:     protocol.CanonicalHash(map[string]string{"type": "object"}),
+		OperatingModes:         []protocol.NetworkOperatingMode{protocol.NetworkModeWarmService},
+		WorkloadKinds:          []string{string(protocol.WorkloadVideoStream)},
+		ExecutorProviders:      []string{"stream-service-session"},
+		ExecutionSecurityTiers: []protocol.ExecutionSecurityTier{protocol.ExecutionHardenedContainer},
+		ProofTiers:             []protocol.ProofTier{protocol.ProofStreamSegmentManifest},
+		NetworkModes:           []protocol.NetworkMode{protocol.NetworkModeDirect},
+		RuntimeContract: protocol.ProviderRuntimeContract{Profiles: []protocol.ProviderRuntimeProfile{{
+			ID:                        "stream-service-session-runtime",
+			RuntimeProfile:            protocol.RuntimeProfileServiceOCI,
+			ExecutorProvider:          "stream-service-session",
+			ExecutionSecurityTier:     protocol.ExecutionHardenedContainer,
+			ProofTier:                 protocol.ProofStreamSegmentManifest,
+			AllowedRuntimeTools:       []protocol.ContainerRuntimeTool{protocol.ContainerRuntimeDocker, protocol.ContainerRuntimePodman, protocol.ContainerRuntimeNerdctl},
+			ImageDigestRequired:       true,
+			RootFSDigestRequired:      true,
+			AllowedMountRefs:          []string{"workspace"},
+			WritablePaths:             []string{"/tmp"},
+			WritableRootFS:            protocol.RuntimePermissionForbidden,
+			Privileged:                protocol.RuntimePermissionForbidden,
+			HostNamespaces:            protocol.RuntimePermissionForbidden,
+			HostSocket:                protocol.RuntimePermissionForbidden,
+			SeccompDisable:            protocol.RuntimePermissionForbidden,
+			NoNewPrivilegesDisable:    protocol.RuntimePermissionForbidden,
+			ConformanceProfiles:       []string{"mediamtx-service-session-v1"},
+			UpstreamClientConformance: protocol.UpstreamClientConformanceShapeOnly,
+		}}},
 	}
 }
 
