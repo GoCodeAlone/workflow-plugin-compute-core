@@ -666,7 +666,7 @@ func TestContainerBuildWorkloadContractUsesRegistryRefs(t *testing.T) {
 	}
 }
 
-func TestWASMRuntimePayloadContracts(t *testing.T) {
+func TestWASMRuntimePayloadContractsAndProviderWorkloadRefs(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	wasm := protocol.WASMWorkload{
 		ComponentRef:    "artifact://edge/echo.wasm",
@@ -696,6 +696,25 @@ func TestWASMRuntimePayloadContracts(t *testing.T) {
 		ComponentDigest: digest,
 		ABI:             "wasm-export-i32-v1",
 		Input:           json.RawMessage(`{"url":"https://example.invalid"}`),
+		ArtifactRefs:    []string{"artifact://pool/tasks/task-1/proofs/proof-1/out.txt"},
+		ContentInputs: []protocol.ContentInputRef{{
+			Name:        "source",
+			Ref:         "content://media/source.mov",
+			TargetPath:  "inputs/source.mov",
+			ContentType: "video/quicktime",
+			ProviderID:  "workflow-plugin-media",
+		}},
+		StreamInputs: []protocol.StreamInputRef{{
+			Name: "live",
+			Handle: protocol.StreamHandle{
+				URL:          "rtmp://stream.example/live/session-1",
+				Protocol:     "rtmp",
+				AuthTokenRef: "secret://stream/session-1/read-token",
+				Codecs:       []string{"h264", "aac"},
+				ExpiresAt:    "2026-06-30T08:00:00Z",
+			},
+			ProviderID: "workflow-plugin-stream",
+		}},
 	}
 	if err := provider.Validate(); err != nil {
 		t.Fatalf("valid provider workload rejected: %v", err)
@@ -703,6 +722,24 @@ func TestWASMRuntimePayloadContracts(t *testing.T) {
 	provider.ComponentRef = "provider://other-plugin/browser.wasm"
 	if err := provider.Validate(); err == nil || !strings.Contains(err.Error(), "provider plugin") {
 		t.Fatalf("mismatched provider component accepted: %v", err)
+	}
+
+	provider = protocol.ProviderWorkload{
+		ProviderConfig: protocol.ProviderConfig{
+			PluginID:   "workflow-plugin-product-capture",
+			ProviderID: "browser",
+			ContractID: "product-capture.browser.v1",
+			Version:    "v0.1.0",
+			ConfigRef:  "config://browser",
+		},
+		Operation:       "capture",
+		ComponentRef:    "provider://workflow-plugin-product-capture/browser.wasm",
+		ComponentDigest: digest,
+		Input:           json.RawMessage(`{"url":"https://example.invalid"}`),
+		ArtifactRefs:    []string{"https://example.invalid/out.txt"},
+	}
+	if err := provider.Validate(); err == nil || !strings.Contains(err.Error(), "artifact_refs") {
+		t.Fatalf("malformed provider artifact ref accepted: %v", err)
 	}
 }
 

@@ -2719,13 +2719,16 @@ func productCaptureHostAllowed(host string, allowed []string) bool {
 }
 
 type ProviderWorkload struct {
-	ProviderConfig  ProviderConfig  `json:"provider_config"`
-	Operation       string          `json:"operation"`
-	ImageRef        string          `json:"image_ref,omitempty"`
-	ComponentRef    string          `json:"component_ref,omitempty"`
-	ComponentDigest string          `json:"component_digest,omitempty"`
-	ABI             string          `json:"abi,omitempty"`
-	Input           json.RawMessage `json:"input"`
+	ProviderConfig  ProviderConfig    `json:"provider_config"`
+	Operation       string            `json:"operation"`
+	ImageRef        string            `json:"image_ref,omitempty"`
+	ComponentRef    string            `json:"component_ref,omitempty"`
+	ComponentDigest string            `json:"component_digest,omitempty"`
+	ABI             string            `json:"abi,omitempty"`
+	Input           json.RawMessage   `json:"input"`
+	ArtifactRefs    []string          `json:"artifact_refs,omitempty"`
+	ContentInputs   []ContentInputRef `json:"content_inputs,omitempty"`
+	StreamInputs    []StreamInputRef  `json:"stream_inputs,omitempty"`
 }
 
 func (w ProviderWorkload) Validate() error {
@@ -2774,6 +2777,21 @@ func (w ProviderWorkload) Validate() error {
 	}
 	if err := validateJSONInput(w.Input); err != nil {
 		errs = append(errs, fmt.Errorf("input: %w", err))
+	}
+	for i, ref := range w.ArtifactRefs {
+		if err := validateScopedRef(fmt.Sprintf("artifact_refs[%d]", i), ref, "artifact://"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for i, ref := range w.ContentInputs {
+		if err := ref.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("content_inputs[%d]: %w", i, err))
+		}
+	}
+	for i, ref := range w.StreamInputs {
+		if err := ref.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("stream_inputs[%d]: %w", i, err))
+		}
 	}
 	return errors.Join(errs...)
 }
