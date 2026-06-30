@@ -52,6 +52,8 @@ const (
 	WorkloadProductCapture     WorkloadKind = "product-capture"
 	WorkloadProvider           WorkloadKind = "provider"
 	WorkloadWASMComponent      WorkloadKind = "wasm-component"
+	WorkloadVideoStream        WorkloadKind = "video-stream"
+	WorkloadMediaTransform     WorkloadKind = "media-transform"
 )
 
 type RuntimeProfile string
@@ -131,12 +133,13 @@ const (
 type ProofTier string
 
 const (
-	ProofReceiptOnly      ProofTier = "receipt-only"
-	ProofArtifactHash     ProofTier = "artifact-hash"
-	ProofReplicatedQuorum ProofTier = "replicated-quorum"
-	ProofAttestedReceipt  ProofTier = "attested-receipt"
-	ProofAttestedQuorum   ProofTier = "attested-quorum"
-	ProofZKReplay         ProofTier = "zk-replay"
+	ProofReceiptOnly           ProofTier = "receipt-only"
+	ProofArtifactHash          ProofTier = "artifact-hash"
+	ProofReplicatedQuorum      ProofTier = "replicated-quorum"
+	ProofAttestedReceipt       ProofTier = "attested-receipt"
+	ProofAttestedQuorum        ProofTier = "attested-quorum"
+	ProofZKReplay              ProofTier = "zk-replay"
+	ProofStreamSegmentManifest ProofTier = "stream-segment-manifest"
 )
 
 type VerificationStatus string
@@ -2101,6 +2104,8 @@ type WorkloadSpec struct {
 	ContainerBuild *ContainerBuildWorkload      `json:"container_build,omitempty"`
 	Service        *ServiceWorkload             `json:"service,omitempty"`
 	NodeService    *NodeServiceWorkload         `json:"node_service,omitempty"`
+	VideoStream    *StreamSpec                  `json:"video_stream,omitempty"`
+	MediaTransform *MediaTransformSpec          `json:"media_transform,omitempty"`
 	ProductCapture *ProductCaptureWorkload      `json:"product_capture,omitempty"`
 	Provider       *ProviderWorkload            `json:"provider,omitempty"`
 	WASM           *WASMWorkload                `json:"wasm,omitempty"`
@@ -2129,6 +2134,16 @@ func (w WorkloadSpec) Validate() error {
 			return errors.New("node_service workload is required")
 		}
 		return w.NodeService.Validate()
+	case WorkloadVideoStream:
+		if w.VideoStream == nil {
+			return errors.New("video_stream workload is required")
+		}
+		return w.VideoStream.Validate()
+	case WorkloadMediaTransform:
+		if w.MediaTransform == nil {
+			return errors.New("media_transform workload is required")
+		}
+		return w.MediaTransform.Validate()
 	case WorkloadProductCapture:
 		if w.ProductCapture == nil {
 			return errors.New("product_capture workload is required")
@@ -2911,9 +2926,14 @@ func (c RuntimeAdapterContract) Validate() error {
 		}
 		seenWorkloads[kind] = struct{}{}
 	}
-	if c.SupportsAdapterKind(RuntimeAdapterServiceRun) || c.SupportsAdapterKind(RuntimeAdapterServiceSession) {
+	if c.SupportsAdapterKind(RuntimeAdapterServiceRun) {
 		if !c.Supports(WorkloadService) && !c.Supports(WorkloadNodeService) {
 			errs = append(errs, errors.New("service adapter kinds require service workload kind"))
+		}
+	}
+	if c.SupportsAdapterKind(RuntimeAdapterServiceSession) {
+		if !c.Supports(WorkloadService) && !c.Supports(WorkloadNodeService) && !c.Supports(WorkloadVideoStream) {
+			errs = append(errs, errors.New("service-session adapter kind requires service, node-service, or video-stream workload kind"))
 		}
 	}
 	for i, profile := range c.RuntimeProfiles {
@@ -6402,7 +6422,9 @@ func validWorkloadKind(kind WorkloadKind) bool {
 		WorkloadSupervisor,
 		WorkloadProductCapture,
 		WorkloadProvider,
-		WorkloadWASMComponent:
+		WorkloadWASMComponent,
+		WorkloadVideoStream,
+		WorkloadMediaTransform:
 		return true
 	default:
 		return false
@@ -6440,7 +6462,8 @@ func validProofTier(tier ProofTier) bool {
 		ProofReplicatedQuorum,
 		ProofAttestedReceipt,
 		ProofAttestedQuorum,
-		ProofZKReplay:
+		ProofZKReplay,
+		ProofStreamSegmentManifest:
 		return true
 	default:
 		return false

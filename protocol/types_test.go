@@ -252,6 +252,37 @@ func TestWorkloadSpecAllowsReservedHostWorkloadKinds(t *testing.T) {
 	}
 }
 
+func TestWorkloadSpecValidatesVideoStreamWorkload(t *testing.T) {
+	workload := protocol.WorkloadSpec{
+		Kind: protocol.WorkloadVideoStream,
+		VideoStream: &protocol.StreamSpec{
+			IngestProtocols: []string{"rtmp"},
+			Destinations:    []protocol.StreamDestination{{TargetRef: "stream://live/main"}},
+		},
+	}
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("video-stream workload should validate: %v", err)
+	}
+	workload.VideoStream = nil
+	if err := workload.Validate(); err == nil {
+		t.Fatalf("expected missing video_stream payload to fail")
+	}
+}
+
+func TestWorkloadSpecValidatesMediaTransformWorkload(t *testing.T) {
+	workload := protocol.WorkloadSpec{
+		Kind:           protocol.WorkloadMediaTransform,
+		MediaTransform: &protocol.MediaTransformSpec{Scale: "720p", FPS: 30},
+	}
+	if err := workload.Validate(); err != nil {
+		t.Fatalf("media-transform workload should validate: %v", err)
+	}
+	workload.MediaTransform = nil
+	if err := workload.Validate(); err == nil {
+		t.Fatalf("expected missing media_transform payload to fail")
+	}
+}
+
 func TestWorkloadFileRefRejectsTrimmedAbsolutePath(t *testing.T) {
 	ref := protocol.WorkloadFileRef{
 		Path:     " /etc/passwd",
@@ -501,8 +532,16 @@ func TestRuntimeAdapterContractRequiresServiceWorkloadForServiceAdapters(t *test
 	}
 
 	err := contract.Validate()
-	if err == nil || !strings.Contains(err.Error(), "service adapter kinds require service workload kind") {
-		t.Fatalf("expected service workload error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "service-session adapter kind requires service, node-service, or video-stream workload kind") {
+		t.Fatalf("expected service-session workload error, got %v", err)
+	}
+	contract.WorkloadKinds = []protocol.WorkloadKind{protocol.WorkloadVideoStream}
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("service-session video-stream contract should validate: %v", err)
+	}
+	contract.Kinds = []protocol.RuntimeAdapterKind{protocol.RuntimeAdapterServiceRun}
+	if err := contract.Validate(); err == nil || !strings.Contains(err.Error(), "service adapter kinds require service workload kind") {
+		t.Fatalf("expected service-run workload error, got %v", err)
 	}
 }
 
