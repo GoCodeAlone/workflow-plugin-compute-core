@@ -671,6 +671,7 @@ const (
 	RuntimeBackendFamilyAppleContainer RuntimeBackendFamily = "apple-container"
 	RuntimeBackendFamilyHyperV         RuntimeBackendFamily = "hyper-v"
 	RuntimeBackendFamilyWSL            RuntimeBackendFamily = "wsl"
+	RuntimeBackendFamilyMediaMTX       RuntimeBackendFamily = "mediamtx"
 )
 
 type RuntimeIsolationMode string
@@ -6542,7 +6543,8 @@ func validRuntimeBackendFamily(family RuntimeBackendFamily) bool {
 		RuntimeBackendFamilyContainerd,
 		RuntimeBackendFamilyAppleContainer,
 		RuntimeBackendFamilyHyperV,
-		RuntimeBackendFamilyWSL:
+		RuntimeBackendFamilyWSL,
+		RuntimeBackendFamilyMediaMTX:
 		return true
 	default:
 		return false

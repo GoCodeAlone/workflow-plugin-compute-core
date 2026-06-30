@@ -1142,6 +1142,16 @@ func TestManagedRuntimeBundleDescriptorValidatesSignedScopedBundle(t *testing.T)
 	}
 }
 
+func TestManagedRuntimeBundleDescriptorAcceptsMediaMTXFamily(t *testing.T) {
+	descriptor := validManagedRuntimeBundleDescriptor()
+	descriptor.BundleID = "mediamtx-linux-amd64"
+	descriptor.Family = protocol.RuntimeBackendFamilyMediaMTX
+	descriptor.SignatureSubject.RuntimeFamily = protocol.RuntimeBackendFamilyMediaMTX
+	if err := descriptor.ValidateAt(time.Unix(1_700_000_000, 0).UTC()); err != nil {
+		t.Fatalf("mediamtx descriptor invalid: %v", err)
+	}
+}
+
 func TestManagedRuntimeBundleDescriptorRejectsIncompleteTrustAndScope(t *testing.T) {
 	descriptor := validManagedRuntimeBundleDescriptor()
 	descriptor.ArtifactDigest = "sha256:not-hex"
