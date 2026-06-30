@@ -1,6 +1,7 @@
 package protocol_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow-plugin-compute-core/protocol"
@@ -88,5 +89,12 @@ func TestMediaTransformSpecRejectsInvalidTransposeAndRotate(t *testing.T) {
 		if err := tc.Validate(); err == nil {
 			t.Fatalf("expected invalid transform %+v to fail", tc)
 		}
+	}
+}
+
+func TestMediaTransformSpecRotateErrorMentionsUnsetValue(t *testing.T) {
+	err := (protocol.MediaTransformSpec{RotateDegrees: 45}).Validate()
+	if err == nil || !strings.Contains(err.Error(), "0, 90, 180, or 270") {
+		t.Fatalf("rotate_degrees error = %v, want allowed values including 0", err)
 	}
 }

@@ -2,6 +2,7 @@ package protocol_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/GoCodeAlone/workflow-plugin-compute-core/protocol"
@@ -78,6 +79,26 @@ func TestContentInputRefValidate(t *testing.T) {
 		if err := candidate.Validate(); err != nil {
 			t.Fatalf("ref %q rejected: %v", ref, err)
 		}
+	}
+}
+
+func TestContentInputRefReportsPreciseMalformedRefReasons(t *testing.T) {
+	ref := protocol.ContentInputRef{
+		Name:        "source-video",
+		Ref:         " s3://media-bucket/input.mov ",
+		TargetPath:  "inputs/source.mov",
+		ContentType: "video/quicktime",
+		ProviderID:  "workflow-plugin-aws",
+	}
+	err := ref.Validate()
+	if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
+		t.Fatalf("whitespace ref error = %v, want surrounding whitespace", err)
+	}
+
+	ref.Ref = "s3://media-bucket/input.mov?version=1"
+	err = ref.Validate()
+	if err == nil || !strings.Contains(err.Error(), "query or fragment") {
+		t.Fatalf("query ref error = %v, want query or fragment", err)
 	}
 }
 

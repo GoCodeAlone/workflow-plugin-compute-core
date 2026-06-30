@@ -181,8 +181,11 @@ func validStreamProtocol(protocol string) bool {
 }
 
 func validateContentInputRef(name, value string) error {
-	if strings.TrimSpace(value) != value || strings.TrimSpace(value) == "" {
+	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("%s is required", name)
+	}
+	if strings.TrimSpace(value) != value {
+		return fmt.Errorf("%s must not contain surrounding whitespace", name)
 	}
 	var scheme string
 	for _, candidate := range []string{"content://", "s3://", "gs://", "spaces://"} {
@@ -201,8 +204,11 @@ func validateContentInputRef(name, value string) error {
 	if err != nil {
 		return fmt.Errorf("%s is invalid: %w", name, err)
 	}
-	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if parsed.User != nil {
 		return fmt.Errorf("%s must not contain raw credential material", name)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%s must not contain query or fragment", name)
 	}
 	lower := strings.ToLower(value)
 	for _, marker := range []string{"access_key=", "secret_key=", "token=", "password=", "credential=", "aws_secret_access_key"} {

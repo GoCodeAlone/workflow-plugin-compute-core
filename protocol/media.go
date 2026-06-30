@@ -40,7 +40,7 @@ func (m MediaTransformSpec) Validate() error {
 	switch m.RotateDegrees {
 	case 0, 90, 180, 270:
 	default:
-		errs = append(errs, errors.New("rotate_degrees must be 90, 180, or 270"))
+		errs = append(errs, errors.New("rotate_degrees must be 0, 90, 180, or 270"))
 	}
 	for _, r := range m.Renditions {
 		if r.Name == "" {
