@@ -63,3 +63,30 @@ func TestMediaTransformSpecWithRenditionsPasses(t *testing.T) {
 		t.Fatalf("expected valid MediaTransformSpec with renditions to pass, got: %v", err)
 	}
 }
+
+func TestMediaTransformSpecTransposeAndRotatePass(t *testing.T) {
+	for _, transpose := range []string{"clock", "cclock", "clock_flip", "cclock_flip"} {
+		m := protocol.MediaTransformSpec{Transpose: transpose}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("transpose %q rejected: %v", transpose, err)
+		}
+	}
+	for _, degrees := range []int{90, 180, 270} {
+		m := protocol.MediaTransformSpec{RotateDegrees: degrees}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("rotate_degrees %d rejected: %v", degrees, err)
+		}
+	}
+}
+
+func TestMediaTransformSpecRejectsInvalidTransposeAndRotate(t *testing.T) {
+	for _, tc := range []protocol.MediaTransformSpec{
+		{Transpose: "sideways"},
+		{RotateDegrees: 45},
+		{RotateDegrees: -90},
+	} {
+		if err := tc.Validate(); err == nil {
+			t.Fatalf("expected invalid transform %+v to fail", tc)
+		}
+	}
+}

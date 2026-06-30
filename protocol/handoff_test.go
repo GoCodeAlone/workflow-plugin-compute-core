@@ -36,6 +36,85 @@ func TestStreamHandleValidate(t *testing.T) {
 	}
 }
 
+func TestContentInputRefValidate(t *testing.T) {
+	t.Parallel()
+	valid := protocol.ContentInputRef{
+		Name:        "source-video",
+		Ref:         "s3://media-bucket/input.mov",
+		TargetPath:  "inputs/source.mov",
+		SHA256:      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ContentType: "video/quicktime",
+		SizeBytes:   42,
+		ProviderID:  "workflow-plugin-aws",
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid content input ref: %v", err)
+	}
+	for name, mutate := range map[string]func(*protocol.ContentInputRef){
+		"missing name":       func(r *protocol.ContentInputRef) { r.Name = "" },
+		"bad ref scheme":     func(r *protocol.ContentInputRef) { r.Ref = "https://example.invalid/input.mov" },
+		"raw credential ref": func(r *protocol.ContentInputRef) { r.Ref = "s3://AKIASECRET:pw@media-bucket/input.mov" },
+		"unsafe target path": func(r *protocol.ContentInputRef) { r.TargetPath = "../input.mov" },
+		"bad sha":            func(r *protocol.ContentInputRef) { r.SHA256 = "sha256:not-hex" },
+		"negative size":      func(r *protocol.ContentInputRef) { r.SizeBytes = -1 },
+		"bad provider id":    func(r *protocol.ContentInputRef) { r.ProviderID = "aws/plugin" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			ref := valid
+			mutate(&ref)
+			if err := ref.Validate(); err == nil {
+				t.Fatalf("expected invalid content input ref")
+			}
+		})
+	}
+	for _, ref := range []string{
+		"content://media/source.mov",
+		"s3://media-bucket/input.mov",
+		"gs://media-bucket/input.mov",
+		"spaces://media-bucket/input.mov",
+	} {
+		candidate := valid
+		candidate.Ref = ref
+		if err := candidate.Validate(); err != nil {
+			t.Fatalf("ref %q rejected: %v", ref, err)
+		}
+	}
+}
+
+func TestStreamInputRefValidate(t *testing.T) {
+	t.Parallel()
+	valid := protocol.StreamInputRef{
+		Name: "live-main",
+		Handle: protocol.StreamHandle{
+			URL:          "rtmp://stream.example/live/session-1",
+			Protocol:     "rtmp",
+			AuthTokenRef: "secret://stream/session-1/read-token",
+			Codecs:       []string{"h264", "aac"},
+			ExpiresAt:    "2026-06-30T08:00:00Z",
+		},
+		ProviderID: "workflow-plugin-stream",
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid stream input ref: %v", err)
+	}
+	for name, mutate := range map[string]func(*protocol.StreamInputRef){
+		"missing name":    func(r *protocol.StreamInputRef) { r.Name = "" },
+		"bad protocol":    func(r *protocol.StreamInputRef) { r.Handle.Protocol = "ftp" },
+		"bad token ref":   func(r *protocol.StreamInputRef) { r.Handle.AuthTokenRef = "raw-token" },
+		"missing codec":   func(r *protocol.StreamInputRef) { r.Handle.Codecs = []string{"h264", ""} },
+		"bad expiry":      func(r *protocol.StreamInputRef) { r.Handle.ExpiresAt = "tomorrow" },
+		"bad provider id": func(r *protocol.StreamInputRef) { r.ProviderID = "stream/plugin" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			ref := valid
+			mutate(&ref)
+			if err := ref.Validate(); err == nil {
+				t.Fatalf("expected invalid stream input ref")
+			}
+		})
+	}
+}
+
 func TestForwardableArtifactRefValidate(t *testing.T) {
 	t.Parallel()
 	valid := protocol.ForwardableArtifactRef{
