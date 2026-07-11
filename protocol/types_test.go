@@ -17,6 +17,66 @@ func TestProviderContractAcceptsBatchSandboxedOCI(t *testing.T) {
 	}
 }
 
+func TestLeaseProviderArtifactSpecsJSONRoundTrip(t *testing.T) {
+	want := protocol.Lease{
+		ID:       "lease-1",
+		TaskID:   "task-1",
+		WorkerID: "agent-1",
+		PoolID:   "pool-1",
+		ProviderArtifactSpecs: []protocol.ProviderArtifactSpec{{
+			Name:             "product_json",
+			Required:         true,
+			ContentType:      "application/json",
+			MaxBytes:         4096,
+			RetentionSeconds: 3600,
+		}},
+	}
+
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal lease: %v", err)
+	}
+	if !strings.Contains(string(data), `"provider_artifact_specs":[{"name":"product_json","required":true,"content_type":"application/json","max_bytes":4096,"retention_seconds":3600}]`) {
+		t.Fatalf("lease JSON = %s", data)
+	}
+	var got protocol.Lease
+	if err := protocol.DecodeStrict(strings.NewReader(string(data)), &got); err != nil {
+		t.Fatalf("strict decode lease: %v", err)
+	}
+	if len(got.ProviderArtifactSpecs) != 1 || got.ProviderArtifactSpecs[0] != want.ProviderArtifactSpecs[0] {
+		t.Fatalf("provider artifact specs = %+v", got.ProviderArtifactSpecs)
+	}
+}
+
+func TestTaskSubmissionCannotSetProviderArtifactSpecs(t *testing.T) {
+	data, err := json.Marshal(protocol.Task{})
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+	if strings.Contains(string(data), "provider_artifact_specs") {
+		t.Fatalf("task JSON exposes server-derived provider artifact specs: %s", data)
+	}
+	var task protocol.Task
+	if err := protocol.DecodeStrict(strings.NewReader(`{"provider_artifact_specs":[]}`), &task); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("strict task decode error = %v, want unknown field", err)
+	}
+}
+
+func TestTaskArtifactExactJSONRoundTrip(t *testing.T) {
+	wantJSON := `{"task_id":"task-1","proof_id":"proof-1","pool_id":"pool-1","name":"run-logs/result.json","ref":"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json","content_type":"application/json","sha256":"sha256:fixture","size_bytes":34,"created_at":"2026-07-11T12:00:00Z","expires_at":"2026-07-11T13:00:00Z"}`
+	var artifact protocol.TaskArtifact
+	if err := protocol.DecodeStrict(strings.NewReader(wantJSON), &artifact); err != nil {
+		t.Fatalf("strict decode task artifact: %v", err)
+	}
+	data, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatalf("marshal task artifact: %v", err)
+	}
+	if string(data) != wantJSON {
+		t.Fatalf("artifact JSON = %s, want %s", data, wantJSON)
+	}
+}
+
 func TestRuntimeDescriptorProducesExecutorRef(t *testing.T) {
 	descriptor := protocol.RuntimeDescriptor{
 		Name:                  "sandboxed-command",

@@ -3877,41 +3877,154 @@ type Security struct {
 }
 
 type Capabilities struct {
-	MachineID         string                  `json:"machine_id,omitempty"`
-	OS                string                  `json:"os,omitempty"`
-	Arch              string                  `json:"arch,omitempty"`
-	CPUModel          string                  `json:"cpu_model,omitempty"`
-	CPUCount          int                     `json:"cpu_count,omitempty"`
-	MemoryBytes       int64                   `json:"memory_bytes,omitempty"`
-	DiskBytes         int64                   `json:"disk_bytes,omitempty"`
-	BandwidthMbps     int64                   `json:"bandwidth_mbps,omitempty"`
-	IngressCapable    bool                    `json:"ingress_capable,omitempty"`
-	GPU               []GPU                   `json:"gpu,omitempty"`
-	ExecutorProviders []string                `json:"executor_providers,omitempty"`
-	Executors         []ExecutorRef           `json:"executors,omitempty"`
-	WorkloadKinds     []string                `json:"workload_kinds,omitempty"`
-	ExecutionTiers    []ExecutionSecurityTier `json:"execution_tiers,omitempty"`
-	ProofTiers        []ProofTier             `json:"proof_tiers,omitempty"`
-	NetworkModes      []NetworkMode           `json:"network_modes,omitempty"`
-	CapabilityTags    []string                `json:"capability_tags,omitempty"`
-	CapabilityReports []CapabilityReport      `json:"capability_reports,omitempty"`
-	HardwareSecurity  Security                `json:"hardware_security,omitzero"`
+	MachineID             string                  `json:"machine_id,omitempty"`
+	OS                    string                  `json:"os,omitempty"`
+	Arch                  string                  `json:"arch,omitempty"`
+	CPUModel              string                  `json:"cpu_model,omitempty"`
+	CPUCount              int                     `json:"cpu_count,omitempty"`
+	MemoryBytes           int64                   `json:"memory_bytes,omitempty"`
+	DiskBytes             int64                   `json:"disk_bytes,omitempty"`
+	BandwidthMbps         int64                   `json:"bandwidth_mbps,omitempty"`
+	IngressCapable        bool                    `json:"ingress_capable,omitempty"`
+	GPU                   []GPU                   `json:"gpu,omitempty"`
+	ExecutorProviders     []string                `json:"executor_providers,omitempty"`
+	Executors             []ExecutorRef           `json:"executors,omitempty"`
+	WorkloadKinds         []string                `json:"workload_kinds,omitempty"`
+	ExecutionTiers        []ExecutionSecurityTier `json:"execution_tiers,omitempty"`
+	ProofTiers            []ProofTier             `json:"proof_tiers,omitempty"`
+	NetworkModes          []NetworkMode           `json:"network_modes,omitempty"`
+	CapabilityTags        []string                `json:"capability_tags,omitempty"`
+	CapabilityReports     []CapabilityReport      `json:"capability_reports,omitempty"`
+	RuntimeBackendReports []RuntimeBackendReport  `json:"runtime_backend_reports,omitempty"`
+	HardwareSecurity      Security                `json:"hardware_security,omitzero"`
+}
+
+type AgentStatus string
+
+const (
+	AgentUnknown  AgentStatus = ""
+	AgentOnline   AgentStatus = "online"
+	AgentDraining AgentStatus = "draining"
+	AgentOffline  AgentStatus = "offline"
+)
+
+type Agent struct {
+	ID                 string                         `json:"id"`
+	OrgID              string                         `json:"org_id"`
+	PoolID             string                         `json:"pool_id"`
+	Status             AgentStatus                    `json:"status"`
+	Capabilities       Capabilities                   `json:"capabilities"`
+	Networks           []AgentNetworkProfile          `json:"networks,omitempty"`
+	Labels             map[string]string              `json:"labels,omitempty"`
+	ComponentVersions  []AgentComponentVersion        `json:"component_versions,omitempty"`
+	SupervisorProfiles []AgentSupervisorProfileStatus `json:"supervisor_profiles,omitempty"`
+	LastSeenAt         time.Time                      `json:"last_seen_at,omitempty"`
+}
+
+type AgentNetworkProfile struct {
+	ID            string        `json:"id,omitempty"`
+	ProductID     string        `json:"product_id,omitempty"`
+	OrgID         string        `json:"org_id"`
+	PoolID        string        `json:"pool_id"`
+	Weight        int           `json:"weight,omitempty"`
+	Disabled      bool          `json:"disabled,omitempty"`
+	WorkloadKinds []string      `json:"workload_kinds,omitempty"`
+	NetworkModes  []NetworkMode `json:"network_modes,omitempty"`
+}
+
+type AgentComponentVersion struct {
+	Component   string `json:"component"`
+	PluginID    string `json:"plugin_id,omitempty"`
+	ComponentID string `json:"component_id,omitempty"`
+	Version     string `json:"version"`
+	Source      string `json:"source"`
+	PID         int    `json:"pid,omitempty"`
+}
+
+type AgentSupervisorProfileStatus struct {
+	ID               string                `json:"id"`
+	Status           string                `json:"status"`
+	Executor         string                `json:"executor,omitempty"`
+	AvailabilityMode string                `json:"availability_mode,omitempty"`
+	ErrorClass       string                `json:"error_class,omitempty"`
+	Networks         []AgentNetworkProfile `json:"networks,omitempty"`
+}
+
+func SelectIdleAgent(agents []Agent, leases []Lease, orgID, poolID string, now time.Time) (Agent, bool) {
+	for _, agent := range agents {
+		if agent.Status != AgentOnline || !agentMatchesNetwork(agent, orgID, poolID) {
+			continue
+		}
+		busy := false
+		for _, lease := range leases {
+			if lease.WorkerID == agent.ID && lease.ExpiresAt.After(now) {
+				busy = true
+				break
+			}
+		}
+		if !busy {
+			return agent, true
+		}
+	}
+	return Agent{}, false
+}
+
+func agentMatchesNetwork(agent Agent, orgID, poolID string) bool {
+	defaultOrgID := strings.TrimSpace(agent.OrgID)
+	defaultPoolID := strings.TrimSpace(agent.PoolID)
+	orgID = strings.TrimSpace(orgID)
+	poolID = strings.TrimSpace(poolID)
+	hasExplicitDefault := false
+	for _, profile := range agent.Networks {
+		profileOrgID := strings.TrimSpace(profile.OrgID)
+		profilePoolID := strings.TrimSpace(profile.PoolID)
+		if strings.TrimSpace(profile.ProductID) == "" && profileOrgID == defaultOrgID && profilePoolID == defaultPoolID {
+			hasExplicitDefault = true
+		}
+		if !profile.Disabled && profileOrgID == orgID && profilePoolID == poolID {
+			return true
+		}
+	}
+	return !hasExplicitDefault && defaultOrgID == orgID && defaultPoolID == poolID
+}
+
+func FindQueuedTask(tasks []Task, orgID, poolID string) (Task, bool) {
+	for _, task := range tasks {
+		if task.OrgID == orgID && task.PoolID == poolID && task.Status == TaskQueued {
+			return task, true
+		}
+	}
+	return Task{}, false
+}
+
+type TaskArtifact struct {
+	TaskID      string    `json:"task_id"`
+	ProofID     string    `json:"proof_id"`
+	PoolID      string    `json:"pool_id"`
+	Name        string    `json:"name"`
+	Ref         string    `json:"ref"`
+	ContentType string    `json:"content_type,omitempty"`
+	SHA256      string    `json:"sha256"`
+	SizeBytes   int64     `json:"size_bytes"`
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 type Lease struct {
-	ID                 string            `json:"id"`
-	TaskID             string            `json:"task_id"`
-	WorkerID           string            `json:"worker_id"`
-	PoolID             string            `json:"pool_id"`
-	Executor           ExecutorRef       `json:"executor"`
-	CapabilitySnapshot Capabilities      `json:"capability_snapshot"`
-	AllowedPushTargets []string          `json:"allowed_push_targets,omitempty"`
-	AllowedPullTargets []string          `json:"allowed_pull_targets,omitempty"`
-	NetworkPolicy      NetworkPolicy     `json:"network_policy,omitzero"`
-	P2PSessionPolicy   *P2PSessionPolicy `json:"p2p_session_policy,omitempty"`
-	ResiduePolicy      ResiduePolicy     `json:"residue_policy,omitzero"`
-	LeasedAt           time.Time         `json:"leased_at"`
-	ExpiresAt          time.Time         `json:"expires_at"`
+	ID                    string                 `json:"id"`
+	TaskID                string                 `json:"task_id"`
+	WorkerID              string                 `json:"worker_id"`
+	PoolID                string                 `json:"pool_id"`
+	Executor              ExecutorRef            `json:"executor"`
+	CapabilitySnapshot    Capabilities           `json:"capability_snapshot"`
+	AllowedPushTargets    []string               `json:"allowed_push_targets,omitempty"`
+	AllowedPullTargets    []string               `json:"allowed_pull_targets,omitempty"`
+	ProviderArtifactSpecs []ProviderArtifactSpec `json:"provider_artifact_specs,omitempty"`
+	NetworkPolicy         NetworkPolicy          `json:"network_policy,omitzero"`
+	P2PSessionPolicy      *P2PSessionPolicy      `json:"p2p_session_policy,omitempty"`
+	ResiduePolicy         ResiduePolicy          `json:"residue_policy,omitzero"`
+	LeasedAt              time.Time              `json:"leased_at"`
+	ExpiresAt             time.Time              `json:"expires_at"`
 }
 
 func (l Lease) Validate() error {
@@ -3933,6 +4046,7 @@ func (l Lease) Validate() error {
 	if strings.TrimSpace(l.CapabilitySnapshot.Arch) == "" {
 		errs = append(errs, errors.New("capability_snapshot.arch is required"))
 	}
+	errs = append(errs, validateProviderArtifactSpecs("provider_artifact_specs", l.ProviderArtifactSpecs, nil)...)
 	if err := l.NetworkPolicy.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("network_policy: %w", err))
 	}
@@ -4201,42 +4315,48 @@ func (o ProviderOperation) Validate() error {
 		}
 		legacyArtifacts[artifact] = struct{}{}
 	}
-	seenArtifactSpecs := map[string]struct{}{}
-	for i, spec := range o.ArtifactSpecs {
+	errs = append(errs, validateProviderArtifactSpecs("artifact_specs", o.ArtifactSpecs, legacyArtifacts)...)
+	return errors.Join(errs...)
+}
+
+func validateProviderArtifactSpecs(field string, specs []ProviderArtifactSpec, legacyArtifacts map[string]struct{}) []error {
+	var errs []error
+	seen := map[string]struct{}{}
+	for i, spec := range specs {
 		if !validProviderArtifactName(spec.Name) {
-			errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q is invalid", i, spec.Name))
+			errs = append(errs, fmt.Errorf("%s[%d].name %q is invalid", field, i, spec.Name))
 		}
 		if spec.Name != "" {
-			if _, exists := seenArtifactSpecs[spec.Name]; exists {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q is duplicated", i, spec.Name))
+			if _, exists := seen[spec.Name]; exists {
+				errs = append(errs, fmt.Errorf("%s[%d].name %q is duplicated", field, i, spec.Name))
 			}
-			seenArtifactSpecs[spec.Name] = struct{}{}
+			seen[spec.Name] = struct{}{}
 			if len(legacyArtifacts) > 0 {
 				if _, exists := legacyArtifacts[spec.Name]; !exists {
-					errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q must also appear in artifacts", i, spec.Name))
+					errs = append(errs, fmt.Errorf("%s[%d].name %q must also appear in artifacts", field, i, spec.Name))
 				}
 			}
 		}
 		if spec.ContentType != "" {
 			if strings.TrimSpace(spec.ContentType) != spec.ContentType || strings.ContainsAny(spec.ContentType, "\x00\r\n\t") {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].content_type is invalid", i))
+				errs = append(errs, fmt.Errorf("%s[%d].content_type is invalid", field, i))
 			} else if _, _, err := mime.ParseMediaType(spec.ContentType); err != nil {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].content_type is invalid", i))
+				errs = append(errs, fmt.Errorf("%s[%d].content_type is invalid", field, i))
 			}
 		}
 		if spec.MaxBytes < 0 {
-			errs = append(errs, fmt.Errorf("artifact_specs[%d].max_bytes must not be negative", i))
+			errs = append(errs, fmt.Errorf("%s[%d].max_bytes must not be negative", field, i))
 		}
 		if spec.RetentionSeconds < 0 {
-			errs = append(errs, fmt.Errorf("artifact_specs[%d].retention_seconds must not be negative", i))
+			errs = append(errs, fmt.Errorf("%s[%d].retention_seconds must not be negative", field, i))
 		}
 		if spec.ProviderReturn != nil {
 			if err := spec.ProviderReturn.Validate(); err != nil {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].provider_return: %w", i, err))
+				errs = append(errs, fmt.Errorf("%s[%d].provider_return: %w", field, i, err))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	return errs
 }
 
 func (o ProviderOperation) NormalizedArtifactSpecs() []ProviderArtifactSpec {
