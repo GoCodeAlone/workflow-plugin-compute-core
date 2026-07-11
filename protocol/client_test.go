@@ -1,9 +1,13 @@
 package protocol_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,5 +188,383 @@ func TestClientStrictDecodeRejectsUnknownFields(t *testing.T) {
 	_, err = client.SubmitTask(context.Background(), validTask(t))
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("SubmitTask error = %v, want strict decode unknown field", err)
+	}
+}
+
+func TestClientListsAgentsAndLeasesWithBearerAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer read-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch r.URL.Path {
+		case "/v1/agents":
+			_, _ = w.Write([]byte(`{"agents":[{"id":"agent-1","org_id":"org-1","pool_id":"pool-1","status":"online","capabilities":{"os":"linux","arch":"amd64","runtime_backend_reports":[{"protocol_version":"compute.v1alpha1","backend_id":"podman-rootless","family":"podman","tool":"podman","version":"5.0.0","status":"supported","isolation_mode":"user-namespace","runtime_profiles":["sandboxed-oci-v1"]}]},"last_seen_at":"2026-07-11T12:00:00Z"}],"summary":{"total":1,"active":1,"stale":0,"offline":0,"registered":1,"historical":0}}`))
+		case "/v1/leases":
+			_, _ = w.Write([]byte(`{"leases":[{"id":"lease-1","task_id":"task-1","worker_id":"agent-1","pool_id":"pool-1","executor":{"provider":"provider-1","version":"v1"},"capability_snapshot":{"os":"linux","arch":"amd64"},"provider_artifact_specs":[{"name":"product_json","required":true,"content_type":"application/json","max_bytes":4096}],"leased_at":"2026-07-11T11:59:00Z","expires_at":"2026-07-11T12:01:00Z"}]}`))
+		default:
+			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL, Token: "read-token"})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	agents, err := client.ListAgents(t.Context())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	if len(agents) != 1 || agents[0].ID != "agent-1" || agents[0].Status != protocol.AgentOnline {
+		t.Fatalf("agents = %+v", agents)
+	}
+	if reports := agents[0].Capabilities.RuntimeBackendReports; len(reports) != 1 || reports[0].BackendID != "podman-rootless" {
+		t.Fatalf("runtime backend reports = %+v", reports)
+	}
+	leases, err := client.ListLeases(t.Context())
+	if err != nil {
+		t.Fatalf("list leases: %v", err)
+	}
+	if len(leases) != 1 || len(leases[0].ProviderArtifactSpecs) != 1 || leases[0].ProviderArtifactSpecs[0].Name != "product_json" {
+		t.Fatalf("leases = %+v", leases)
+	}
+}
+
+func TestClientListTaskArtifactsEscapesTaskID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.EscapedPath(), "/v1/tasks/task%20%2F%25/artifacts"; got != want {
+			t.Fatalf("escaped path = %q, want %q", got, want)
+		}
+		_, _ = w.Write([]byte(`{"artifacts":[]}`))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	artifacts, err := client.ListTaskArtifacts(t.Context(), "task /%")
+	if err != nil {
+		t.Fatalf("list task artifacts: %v", err)
+	}
+	if len(artifacts) != 0 {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+}
+
+func TestClientListTaskArtifactsRejectsPathSegments(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	for _, taskID := range []string{"", ".", ".."} {
+		if artifacts, err := client.ListTaskArtifacts(t.Context(), taskID); err == nil || artifacts != nil {
+			t.Errorf("ListTaskArtifacts(%q) = %+v, %v; want nil, error", taskID, artifacts, err)
+		}
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0", requests)
+	}
+}
+
+func TestClientTaskArtifactServerFixtureRoundTrip(t *testing.T) {
+	const (
+		ref     = "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json"
+		payload = `{"status":"captured","items":[1,2]}`
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer fixture-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch r.URL.EscapedPath() {
+		case "/v1/tasks/task-1/artifacts":
+			_, _ = w.Write([]byte(`{"artifacts":[{"task_id":"task-1","proof_id":"proof-1","pool_id":"pool-1","name":"run-logs/result.json","ref":"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json","content_type":"application/json","sha256":"sha256:0e6c1551d69759758a92a684a2071f892dc834d6f292e75ec76645f7dd04e740","size_bytes":35,"created_at":"2026-07-11T12:00:00Z","expires_at":"2026-07-11T13:00:00Z"}]}`))
+		case "/v1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json":
+			_, _ = w.Write([]byte(payload))
+		default:
+			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.EscapedPath())
+		}
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL, Token: "fixture-token"})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	artifacts, err := client.ListTaskArtifacts(t.Context(), "task-1")
+	if err != nil {
+		t.Fatalf("list task artifacts: %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Ref != ref {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+	digest := sha256.Sum256([]byte(payload))
+	wantSHA256 := "sha256:" + hex.EncodeToString(digest[:])
+	if artifacts[0].SHA256 != wantSHA256 || artifacts[0].SizeBytes != int64(len(payload)) {
+		t.Fatalf("artifact integrity = sha256 %q, size %d; want %q, %d", artifacts[0].SHA256, artifacts[0].SizeBytes, wantSHA256, len(payload))
+	}
+	got, err := client.DownloadTaskArtifact(t.Context(), artifacts[0].Ref, 1024)
+	if err != nil {
+		t.Fatalf("download task artifact: %v", err)
+	}
+	if !bytes.Equal(got, []byte(payload)) {
+		t.Fatalf("download = %q, want exact JSON %q", got, payload)
+	}
+}
+
+func TestClientDownloadTaskArtifactEscapesCanonicalSegments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.EscapedPath(), "/v1/tasks/task%25id/proofs/proof%25id/artifacts/run-logs/stderr%25.txt"; got != want {
+			t.Fatalf("escaped path = %q, want %q", got, want)
+		}
+		_, _ = w.Write([]byte("stderr"))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool%id/tasks/task%id/proofs/proof%id/artifacts/run-logs/stderr%.txt", 32)
+	if err != nil {
+		t.Fatalf("download task artifact: %v", err)
+	}
+	if string(got) != "stderr" {
+		t.Fatalf("download = %q", got)
+	}
+}
+
+func TestClientDownloadTaskArtifactRejectsUnsafeRefsAndLimits(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Fatal("invalid artifact download reached server")
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	refs := []string{
+		"https://example.test/private",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/result.json",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/../secret",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/bad\\name",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/name?token=secret",
+	}
+	for _, ref := range refs {
+		if got, err := client.DownloadTaskArtifact(t.Context(), ref, 32); err == nil || got != nil {
+			t.Errorf("DownloadTaskArtifact(%q) = %q, %v; want nil, error", ref, got, err)
+		}
+	}
+	if got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.json", 0); err == nil || got != nil {
+		t.Fatalf("nonpositive limit = %q, %v; want nil, error", got, err)
+	}
+	if requests != 0 {
+		t.Fatalf("requests = %d, want 0", requests)
+	}
+}
+
+func TestClientDownloadTaskArtifactRejectsMaxBytesPlusOneWithoutPartialData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("12345"))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.txt", 4)
+	if err == nil || !strings.Contains(err.Error(), "maxBytes") {
+		t.Fatalf("error = %v, want maxBytes rejection", err)
+	}
+	if got != nil {
+		t.Fatalf("partial data = %q, want nil", got)
+	}
+}
+
+func TestClientDownloadTaskArtifactHandlesMaxInt64LimitWithoutOverflow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("artifact"))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.txt", math.MaxInt64)
+	if err != nil {
+		t.Fatalf("download task artifact: %v", err)
+	}
+	if string(got) != "artifact" {
+		t.Fatalf("download = %q", got)
+	}
+}
+
+func TestClientAgentLeaseArtifactReadMethodsUseStrictJSON(t *testing.T) {
+	tests := map[string]func(*protocol.Client) error{
+		"agents": func(client *protocol.Client) error {
+			_, err := client.ListAgents(t.Context())
+			return err
+		},
+		"leases": func(client *protocol.Client) error {
+			_, err := client.ListLeases(t.Context())
+			return err
+		},
+		"artifacts": func(client *protocol.Client) error {
+			_, err := client.ListTaskArtifacts(t.Context(), "task-1")
+			return err
+		},
+	}
+	for name, call := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"unexpected":true}`))
+			}))
+			defer server.Close()
+			client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			if err := call(client); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("error = %v, want strict decode unknown field", err)
+			}
+		})
+	}
+}
+
+func TestClientListLeasesStrictlyDecodesProviderArtifactSpecs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"leases":[{"provider_artifact_specs":[{"name":"result","unexpected":true}]}]}`))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if _, err := client.ListLeases(t.Context()); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("ListLeases error = %v, want strict artifact spec decode", err)
+	}
+}
+
+func TestClientAgentLeaseArtifactStatusErrorsDoNotExposeBody(t *testing.T) {
+	const sentinel = "private-read-response"
+	tests := map[string]func(*protocol.Client) error{
+		"agents": func(client *protocol.Client) error {
+			_, err := client.ListAgents(t.Context())
+			return err
+		},
+		"leases": func(client *protocol.Client) error {
+			_, err := client.ListLeases(t.Context())
+			return err
+		},
+		"artifacts": func(client *protocol.Client) error {
+			_, err := client.ListTaskArtifacts(t.Context(), "task-1")
+			return err
+		},
+		"download": func(client *protocol.Client) error {
+			_, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.json", 1024)
+			return err
+		},
+	}
+	for name, call := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, sentinel, http.StatusForbidden)
+			}))
+			defer server.Close()
+			client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			err = call(client)
+			var statusErr protocol.StatusError
+			if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusForbidden {
+				t.Fatalf("error = %T %v, want StatusError 403", err, err)
+			}
+			if strings.Contains(err.Error(), sentinel) {
+				t.Fatalf("status error leaked response body: %v", err)
+			}
+		})
+	}
+}
+
+func TestClientCapacityHelpersSelectOnlineMatchingIdleAgent(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	agents := []protocol.Agent{
+		{ID: "offline", OrgID: "org-1", PoolID: "pool-1", Status: protocol.AgentOffline},
+		{ID: "other-pool", OrgID: "org-1", PoolID: "pool-2", Status: protocol.AgentOnline},
+		{ID: "busy", OrgID: "org-1", PoolID: "pool-1", Status: protocol.AgentOnline},
+		{ID: "idle", OrgID: "org-1", PoolID: "pool-1", Status: protocol.AgentOnline},
+	}
+	leases := []protocol.Lease{
+		{WorkerID: "busy", ExpiresAt: now.Add(time.Minute)},
+		{WorkerID: "idle", ExpiresAt: now.Add(-time.Minute)},
+	}
+
+	got, ok := protocol.SelectIdleAgent(agents, leases, "org-1", "pool-1", now)
+	if !ok || got.ID != "idle" {
+		t.Fatalf("SelectIdleAgent = %+v, %v; want idle", got, ok)
+	}
+}
+
+func TestClientCapacityHelpersFindQueuedMatchingTask(t *testing.T) {
+	tasks := []protocol.Task{
+		{ID: "done", OrgID: "org-1", PoolID: "pool-1", Status: protocol.TaskSucceeded},
+		{ID: "other", OrgID: "org-1", PoolID: "pool-2", Status: protocol.TaskQueued},
+		{ID: "queued", OrgID: "org-1", PoolID: "pool-1", Status: protocol.TaskQueued},
+	}
+
+	got, ok := protocol.FindQueuedTask(tasks, "org-1", "pool-1")
+	if !ok || got.ID != "queued" {
+		t.Fatalf("FindQueuedTask = %+v, %v; want queued", got, ok)
+	}
+}
+
+func TestClientCapacityHelpersSelectAdditionalNetworkMembership(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	agents := []protocol.Agent{{
+		ID:     "additional-member",
+		OrgID:  "org-default",
+		PoolID: "pool-default",
+		Status: protocol.AgentOnline,
+		Networks: []protocol.AgentNetworkProfile{{
+			OrgID:  " org-target ",
+			PoolID: " pool-target ",
+		}},
+	}}
+
+	got, ok := protocol.SelectIdleAgent(agents, nil, "org-target", "pool-target", now)
+	if !ok || got.ID != "additional-member" {
+		t.Fatalf("SelectIdleAgent = %+v, %v; want additional-member", got, ok)
+	}
+}
+
+func TestClientCapacityHelpersDisabledExplicitDefaultBlocksImplicitMembership(t *testing.T) {
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	agents := []protocol.Agent{{
+		ID:     "disabled-default",
+		OrgID:  "org-1",
+		PoolID: "pool-1",
+		Status: protocol.AgentOnline,
+		Networks: []protocol.AgentNetworkProfile{{
+			OrgID:    " org-1 ",
+			PoolID:   " pool-1 ",
+			Disabled: true,
+		}},
+	}}
+
+	if got, ok := protocol.SelectIdleAgent(agents, nil, "org-1", "pool-1", now); ok {
+		t.Fatalf("SelectIdleAgent = %+v, true; want disabled explicit default rejected", got)
 	}
 }
