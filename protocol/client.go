@@ -140,7 +140,7 @@ func (c *Client) ListLeases(ctx context.Context) ([]Lease, error) {
 
 func (c *Client) ListTaskArtifacts(ctx context.Context, taskID string) ([]TaskArtifact, error) {
 	if taskID == "" || taskID == "." || taskID == ".." {
-		return nil, errors.New("taskID must be a non-path segment")
+		return nil, errors.New(`taskID must not be empty, ".", or ".."`)
 	}
 	path := escapedPath("v1", "tasks", taskID, "artifacts")
 	var out taskArtifactListResponse

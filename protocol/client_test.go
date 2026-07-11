@@ -252,7 +252,7 @@ func TestClientListTaskArtifactsEscapesTaskID(t *testing.T) {
 	}
 }
 
-func TestClientListTaskArtifactsRejectsPathSegments(t *testing.T) {
+func TestClientListTaskArtifactsRejectsEmptyAndDotTaskIDs(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -264,8 +264,13 @@ func TestClientListTaskArtifactsRejectsPathSegments(t *testing.T) {
 	}
 
 	for _, taskID := range []string{"", ".", ".."} {
-		if artifacts, err := client.ListTaskArtifacts(t.Context(), taskID); err == nil || artifacts != nil {
+		artifacts, err := client.ListTaskArtifacts(t.Context(), taskID)
+		if err == nil || artifacts != nil {
 			t.Errorf("ListTaskArtifacts(%q) = %+v, %v; want nil, error", taskID, artifacts, err)
+			continue
+		}
+		if got, want := err.Error(), `taskID must not be empty, ".", or ".."`; got != want {
+			t.Errorf("ListTaskArtifacts(%q) error = %q, want %q", taskID, got, want)
 		}
 	}
 	if requests != 0 {

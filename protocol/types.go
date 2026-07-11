@@ -4046,6 +4046,7 @@ func (l Lease) Validate() error {
 	if strings.TrimSpace(l.CapabilitySnapshot.Arch) == "" {
 		errs = append(errs, errors.New("capability_snapshot.arch is required"))
 	}
+	errs = append(errs, validateProviderArtifactSpecs("provider_artifact_specs", l.ProviderArtifactSpecs, nil)...)
 	if err := l.NetworkPolicy.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("network_policy: %w", err))
 	}
@@ -4314,42 +4315,48 @@ func (o ProviderOperation) Validate() error {
 		}
 		legacyArtifacts[artifact] = struct{}{}
 	}
-	seenArtifactSpecs := map[string]struct{}{}
-	for i, spec := range o.ArtifactSpecs {
+	errs = append(errs, validateProviderArtifactSpecs("artifact_specs", o.ArtifactSpecs, legacyArtifacts)...)
+	return errors.Join(errs...)
+}
+
+func validateProviderArtifactSpecs(field string, specs []ProviderArtifactSpec, legacyArtifacts map[string]struct{}) []error {
+	var errs []error
+	seen := map[string]struct{}{}
+	for i, spec := range specs {
 		if !validProviderArtifactName(spec.Name) {
-			errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q is invalid", i, spec.Name))
+			errs = append(errs, fmt.Errorf("%s[%d].name %q is invalid", field, i, spec.Name))
 		}
 		if spec.Name != "" {
-			if _, exists := seenArtifactSpecs[spec.Name]; exists {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q is duplicated", i, spec.Name))
+			if _, exists := seen[spec.Name]; exists {
+				errs = append(errs, fmt.Errorf("%s[%d].name %q is duplicated", field, i, spec.Name))
 			}
-			seenArtifactSpecs[spec.Name] = struct{}{}
+			seen[spec.Name] = struct{}{}
 			if len(legacyArtifacts) > 0 {
 				if _, exists := legacyArtifacts[spec.Name]; !exists {
-					errs = append(errs, fmt.Errorf("artifact_specs[%d].name %q must also appear in artifacts", i, spec.Name))
+					errs = append(errs, fmt.Errorf("%s[%d].name %q must also appear in artifacts", field, i, spec.Name))
 				}
 			}
 		}
 		if spec.ContentType != "" {
 			if strings.TrimSpace(spec.ContentType) != spec.ContentType || strings.ContainsAny(spec.ContentType, "\x00\r\n\t") {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].content_type is invalid", i))
+				errs = append(errs, fmt.Errorf("%s[%d].content_type is invalid", field, i))
 			} else if _, _, err := mime.ParseMediaType(spec.ContentType); err != nil {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].content_type is invalid", i))
+				errs = append(errs, fmt.Errorf("%s[%d].content_type is invalid", field, i))
 			}
 		}
 		if spec.MaxBytes < 0 {
-			errs = append(errs, fmt.Errorf("artifact_specs[%d].max_bytes must not be negative", i))
+			errs = append(errs, fmt.Errorf("%s[%d].max_bytes must not be negative", field, i))
 		}
 		if spec.RetentionSeconds < 0 {
-			errs = append(errs, fmt.Errorf("artifact_specs[%d].retention_seconds must not be negative", i))
+			errs = append(errs, fmt.Errorf("%s[%d].retention_seconds must not be negative", field, i))
 		}
 		if spec.ProviderReturn != nil {
 			if err := spec.ProviderReturn.Validate(); err != nil {
-				errs = append(errs, fmt.Errorf("artifact_specs[%d].provider_return: %w", i, err))
+				errs = append(errs, fmt.Errorf("%s[%d].provider_return: %w", field, i, err))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	return errs
 }
 
 func (o ProviderOperation) NormalizedArtifactSpecs() []ProviderArtifactSpec {

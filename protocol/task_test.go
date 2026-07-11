@@ -78,6 +78,82 @@ func TestLeaseRejectsMalformedAgentWireContract(t *testing.T) {
 	}
 }
 
+func TestLeaseAcceptsProviderArtifactSpecsWithoutLegacyArtifactMembership(t *testing.T) {
+	lease := validLease(t)
+	lease.ProviderArtifactSpecs = []protocol.ProviderArtifactSpec{{
+		Name:             "provider_result",
+		ContentType:      "application/json",
+		MaxBytes:         4096,
+		RetentionSeconds: 3600,
+		ProviderReturn: &protocol.ProviderArtifactReturnSpec{
+			StepType:       "provider_artifact_return",
+			Contract:       "workflow-plugin-ci:provider_artifact_return",
+			SubmitEndpoint: "/v1/provider-return/artifact-deliveries",
+		},
+	}}
+
+	if err := lease.Validate(); err != nil {
+		t.Fatalf("lease invalid: %v", err)
+	}
+}
+
+func TestLeaseRejectsInvalidProviderArtifactSpecs(t *testing.T) {
+	cases := []struct {
+		name  string
+		specs []protocol.ProviderArtifactSpec
+		want  string
+	}{
+		{
+			name:  "invalid name",
+			specs: []protocol.ProviderArtifactSpec{{Name: "results/output"}},
+			want:  `provider_artifact_specs[0].name "results/output" is invalid`,
+		},
+		{
+			name: "duplicate name",
+			specs: []protocol.ProviderArtifactSpec{
+				{Name: "result"},
+				{Name: "result"},
+			},
+			want: `provider_artifact_specs[1].name "result" is duplicated`,
+		},
+		{
+			name:  "malformed content type",
+			specs: []protocol.ProviderArtifactSpec{{Name: "result", ContentType: "application/json\n"}},
+			want:  "provider_artifact_specs[0].content_type is invalid",
+		},
+		{
+			name:  "negative max bytes",
+			specs: []protocol.ProviderArtifactSpec{{Name: "result", MaxBytes: -1}},
+			want:  "provider_artifact_specs[0].max_bytes must not be negative",
+		},
+		{
+			name:  "negative retention seconds",
+			specs: []protocol.ProviderArtifactSpec{{Name: "result", RetentionSeconds: -1}},
+			want:  "provider_artifact_specs[0].retention_seconds must not be negative",
+		},
+		{
+			name: "invalid provider return",
+			specs: []protocol.ProviderArtifactSpec{{
+				Name:           "result",
+				ProviderReturn: &protocol.ProviderArtifactReturnSpec{},
+			}},
+			want: "provider_artifact_specs[0].provider_return:",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lease := validLease(t)
+			lease.ProviderArtifactSpecs = tc.specs
+
+			err := lease.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate() error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func validTask(t *testing.T) protocol.Task {
 	t.Helper()
 	input := mustTaskRawMessage(t, map[string]any{
