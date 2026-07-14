@@ -79,9 +79,13 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 					Reason: "waiting_for_worker",
 					AgeMS:  250,
 				}},
+				Summary: protocol.TaskListSummary{Total: 1, Open: 1, Queued: 1, Stalled: 1},
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/proofs":
-			_ = json.NewEncoder(w).Encode(protocol.ProofList{Proofs: []protocol.ProofReceipt{proof}})
+			_ = json.NewEncoder(w).Encode(protocol.ProofList{
+				Proofs:  []protocol.ProofReceipt{proof},
+				Summary: protocol.ProofListSummary{Total: 1, Accepted: 1},
+			})
 		default:
 			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
 		}
@@ -98,6 +102,9 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 	}
 	if len(list.Tasks) != 1 || list.Tasks[0].ID != task.ID {
 		t.Fatalf("tasks = %+v", list.Tasks)
+	}
+	if list.Summary.Total != 1 || list.Summary.Open != 1 || list.Summary.Queued != 1 || list.Summary.Stalled != 1 {
+		t.Fatalf("task summary = %+v", list.Summary)
 	}
 	snapshot, ok, stalls, err := client.TaskSnapshot(context.Background(), task.ID)
 	if err != nil {
@@ -119,6 +126,109 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 	}
 	if !ok || found.ID != proof.ID {
 		t.Fatalf("found = %+v ok=%v", found, ok)
+	}
+}
+
+func TestClientListResponsesMatchLiveServerContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/tasks":
+			_, _ = w.Write([]byte(`{"tasks":[{"id":"queued-1","status":"queued"},{"id":"queued-2","status":"queued"},{"id":"queued-3","status":"queued"},{"id":"running-1","status":"running"},{"id":"succeeded-1","status":"succeeded"}],"stalls":[{"task_id":"queued-1","reason":"waiting_for_worker","age_ms":1},{"task_id":"queued-2","reason":"waiting_for_worker","age_ms":1}],"summary":{"total":5,"open":4,"queued":3,"stalled":2,"succeeded":1}}`))
+		case "/v1/proofs":
+			_, _ = w.Write([]byte(`{"proofs":[{"id":"accepted-1","verifier":{"status":"accepted"}},{"id":"accepted-2","verifier":{"status":"accepted"}},{"id":"pending-1","verifier":{"status":"pending"}},{"id":"rejected-1","verifier":{"status":"rejected"}},{"id":"conflicted-1","verifier":{"status":"conflicted"}}],"summary":{"total":5,"accepted":2,"pending":1,"rejected":1,"conflicted":1}}`))
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	tasks, err := client.ListTasks(t.Context())
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	wantTasks := protocol.TaskListSummary{Total: 5, Open: 4, Queued: 3, Stalled: 2, Succeeded: 1}
+	if tasks.Summary != wantTasks {
+		t.Fatalf("task summary = %+v, want %+v", tasks.Summary, wantTasks)
+	}
+
+	proofs, err := client.ListProofsWithSummary(t.Context())
+	if err != nil {
+		t.Fatalf("list proofs with summary: %v", err)
+	}
+	wantProofs := protocol.ProofListSummary{Total: 5, Accepted: 2, Pending: 1, Rejected: 1, Conflicted: 1}
+	if proofs.Summary != wantProofs {
+		t.Fatalf("proof summary = %+v, want %+v", proofs.Summary, wantProofs)
+	}
+}
+
+func TestClientListResponsesRejectUnknownFields(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		body string
+		call func(*protocol.Client) error
+	}{
+		{
+			name: "tasks top level",
+			path: "/v1/tasks",
+			body: `{"tasks":[],"summary":{"total":0,"open":0,"queued":0,"stalled":0,"succeeded":0},"unexpected":true}`,
+			call: func(client *protocol.Client) error {
+				_, err := client.ListTasks(t.Context())
+				return err
+			},
+		},
+		{
+			name: "tasks summary",
+			path: "/v1/tasks",
+			body: `{"tasks":[],"summary":{"total":0,"open":0,"queued":0,"stalled":0,"succeeded":0,"unexpected":true}}`,
+			call: func(client *protocol.Client) error {
+				_, err := client.ListTasks(t.Context())
+				return err
+			},
+		},
+		{
+			name: "proofs top level",
+			path: "/v1/proofs",
+			body: `{"proofs":[],"summary":{"total":0,"accepted":0,"pending":0,"rejected":0,"conflicted":0},"unexpected":true}`,
+			call: func(client *protocol.Client) error {
+				_, err := client.ListProofsWithSummary(t.Context())
+				return err
+			},
+		},
+		{
+			name: "proofs summary",
+			path: "/v1/proofs",
+			body: `{"proofs":[],"summary":{"total":0,"accepted":0,"pending":0,"rejected":0,"conflicted":0,"unexpected":true}}`,
+			call: func(client *protocol.Client) error {
+				_, err := client.ListProofsWithSummary(t.Context())
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tt.path)
+					http.Error(w, "unexpected path", http.StatusNotFound)
+					return
+				}
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+			if err != nil {
+				t.Fatalf("new client: %v", err)
+			}
+			if err := tt.call(client); err == nil || !strings.Contains(err.Error(), "unknown field") {
+				t.Fatalf("error = %v, want strict unknown-field rejection", err)
+			}
+		})
 	}
 }
 

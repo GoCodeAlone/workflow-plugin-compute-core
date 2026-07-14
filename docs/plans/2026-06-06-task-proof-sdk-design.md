@@ -52,8 +52,8 @@ Add a new public protocol surface:
 - `TaskStall` and `TaskList` response wrappers for `/v1/tasks`.
 - `TaskResponse` and `ProofList` response wrappers for `/v1/tasks` and
   `/v1/proofs`.
-- `Client` with `SubmitTask`, `ListTasks`, `TaskSnapshot`, `ListProofs`, and
-  `FindProof`.
+- `Client` with `SubmitTask`, `ListTasks`, `TaskSnapshot`, `ListProofs`,
+  `ListProofsWithSummary`, and `FindProof`.
 
 The client will be transport-thin. It will set bearer auth when configured,
 require HTTPS for token-bearing non-loopback URLs, use `DecodeStrict`, and
@@ -136,6 +136,18 @@ The follow-up app PR must prove:
    downstream live usage.
 3. The main YAGNI risk is adding leasing/admin methods. This design excludes
    them and records them as a deferred agent SDK concern.
+
+## Backport 2026-07-14: Complete list wrappers
+
+A live BMW staging proof disproved the assumption that testing only the list
+items was sufficient for strict clients. The control plane also returns typed
+`summary` objects from `/v1/tasks` and `/v1/proofs`; omitting either summary from
+compute-core makes `DisallowUnknownFields` reject an otherwise compatible
+response before any task can run.
+
+Invariant: every strict list-response client must model and test the complete
+server-owned wrapper, including additive typed summary fields, while continuing
+to reject fields outside that declared contract.
 
 ## Rollback
 

@@ -35,8 +35,17 @@ type TaskResponse struct {
 }
 
 type TaskList struct {
-	Tasks  []Task      `json:"tasks"`
-	Stalls []TaskStall `json:"stalls,omitempty"`
+	Tasks   []Task          `json:"tasks"`
+	Stalls  []TaskStall     `json:"stalls,omitempty"`
+	Summary TaskListSummary `json:"summary"`
+}
+
+type TaskListSummary struct {
+	Total     int `json:"total"`
+	Open      int `json:"open"`
+	Queued    int `json:"queued"`
+	Stalled   int `json:"stalled"`
+	Succeeded int `json:"succeeded"`
 }
 
 type TaskStall struct {
@@ -48,7 +57,16 @@ type TaskStall struct {
 }
 
 type ProofList struct {
-	Proofs []ProofReceipt `json:"proofs"`
+	Proofs  []ProofReceipt   `json:"proofs"`
+	Summary ProofListSummary `json:"summary"`
+}
+
+type ProofListSummary struct {
+	Total      int `json:"total"`
+	Accepted   int `json:"accepted"`
+	Pending    int `json:"pending"`
+	Rejected   int `json:"rejected"`
+	Conflicted int `json:"conflicted"`
 }
 
 type agentListResponse struct {
@@ -211,11 +229,19 @@ func (c *Client) TaskSnapshot(ctx context.Context, id string) (Task, bool, []Tas
 }
 
 func (c *Client) ListProofs(ctx context.Context) ([]ProofReceipt, error) {
-	var out ProofList
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/proofs", nil, http.StatusOK, &out); err != nil {
+	out, err := c.ListProofsWithSummary(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return out.Proofs, nil
+}
+
+func (c *Client) ListProofsWithSummary(ctx context.Context) (ProofList, error) {
+	var out ProofList
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/proofs", nil, http.StatusOK, &out); err != nil {
+		return ProofList{}, err
+	}
+	return out, nil
 }
 
 func (c *Client) FindProof(ctx context.Context, taskID string) (ProofReceipt, bool, error) {
