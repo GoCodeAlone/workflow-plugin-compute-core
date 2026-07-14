@@ -198,7 +198,7 @@ func TestClientListsAgentsAndLeasesWithBearerAuth(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/v1/agents":
-			_, _ = w.Write([]byte(`{"agents":[{"id":"agent-1","org_id":"org-1","pool_id":"pool-1","status":"online","capabilities":{"os":"linux","arch":"amd64","runtime_backend_reports":[{"protocol_version":"compute.v1alpha1","backend_id":"podman-rootless","family":"podman","tool":"podman","version":"5.0.0","status":"supported","isolation_mode":"user-namespace","runtime_profiles":["sandboxed-oci-v1"]}]},"last_seen_at":"2026-07-11T12:00:00Z"}],"summary":{"total":1,"active":1,"stale":0,"offline":0,"registered":1,"historical":0}}`))
+			_, _ = w.Write([]byte(`{"agents":[{"id":"agent-1","org_id":"org-1","pool_id":"pool-1","status":"online","capabilities":{"os":"linux","arch":"amd64","runtime_backend_reports":[{"protocol_version":"compute.v1alpha1","backend_id":"podman-rootless","family":"podman","tool":"podman","version":"5.0.0","status":"supported","isolation_mode":"user-namespace","runtime_profiles":["sandboxed-oci-v1"]}]},"last_seen_at":"2026-07-11T12:00:00Z","created_at":"2026-07-01T10:30:00Z"}],"summary":{"total":1,"active":1,"stale":0,"offline":0,"registered":1,"historical":0}}`))
 		case "/v1/leases":
 			_, _ = w.Write([]byte(`{"leases":[{"id":"lease-1","task_id":"task-1","worker_id":"agent-1","pool_id":"pool-1","executor":{"provider":"provider-1","version":"v1"},"capability_snapshot":{"os":"linux","arch":"amd64"},"provider_artifact_specs":[{"name":"product_json","required":true,"content_type":"application/json","max_bytes":4096}],"leased_at":"2026-07-11T11:59:00Z","expires_at":"2026-07-11T12:01:00Z"}]}`))
 		default:
@@ -217,6 +217,9 @@ func TestClientListsAgentsAndLeasesWithBearerAuth(t *testing.T) {
 	}
 	if len(agents) != 1 || agents[0].ID != "agent-1" || agents[0].Status != protocol.AgentOnline {
 		t.Fatalf("agents = %+v", agents)
+	}
+	if want := time.Date(2026, 7, 1, 10, 30, 0, 0, time.UTC); !agents[0].CreatedAt.Equal(want) {
+		t.Fatalf("created_at = %s, want %s", agents[0].CreatedAt, want)
 	}
 	if reports := agents[0].Capabilities.RuntimeBackendReports; len(reports) != 1 || reports[0].BackendID != "podman-rootless" {
 		t.Fatalf("runtime backend reports = %+v", reports)

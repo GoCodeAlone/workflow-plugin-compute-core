@@ -3919,6 +3919,7 @@ type Agent struct {
 	ComponentVersions  []AgentComponentVersion        `json:"component_versions,omitempty"`
 	SupervisorProfiles []AgentSupervisorProfileStatus `json:"supervisor_profiles,omitempty"`
 	LastSeenAt         time.Time                      `json:"last_seen_at,omitempty"`
+	CreatedAt          time.Time                      `json:"created_at,omitempty"`
 }
 
 type AgentNetworkProfile struct {
