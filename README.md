@@ -43,8 +43,10 @@ The task/proof client covers submission and read-only observation:
 
 - `SubmitTask`
 - `ListTasks`
+- `ListTasksWithSummary`
 - `TaskSnapshot`
 - `ListProofs`
+- `ListProofsWithSummary`
 - `FindProof`
 
 Application-specific scheduling, task mutation policy, settlement execution,
