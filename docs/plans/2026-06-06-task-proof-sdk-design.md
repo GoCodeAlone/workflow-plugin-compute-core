@@ -49,11 +49,12 @@ Add a new public protocol surface:
   labels, and signature.
 - `Lease` for the task-agent wire contract, including capability snapshot,
   executor, network/P2P/residue policies, and lease timestamps.
-- `TaskStall` and `TaskList` response wrappers for `/v1/tasks`.
-- `TaskResponse` and `ProofList` response wrappers for `/v1/tasks` and
-  `/v1/proofs`.
-- `Client` with `SubmitTask`, `ListTasks`, `TaskSnapshot`, `ListProofs`,
-  `ListProofsWithSummary`, and `FindProof`.
+- `TaskStall`, legacy `TaskList`, and additive `TaskListWithSummary` response
+  wrappers for `/v1/tasks`.
+- `TaskResponse`, legacy `ProofList`, and additive `ProofListWithSummary`
+  response wrappers for `/v1/tasks` and `/v1/proofs`.
+- `Client` with `SubmitTask`, `ListTasks`, `ListTasksWithSummary`,
+  `TaskSnapshot`, `ListProofs`, `ListProofsWithSummary`, and `FindProof`.
 
 The client will be transport-thin. It will set bearer auth when configured,
 require HTTPS for token-bearing non-loopback URLs, use `DecodeStrict`, and
@@ -148,6 +149,10 @@ response before any task can run.
 Invariant: every strict list-response client must model and test the complete
 server-owned wrapper, including additive typed summary fields, while continuing
 to reject fields outside that declared contract.
+
+Compatibility invariant: complete envelopes use additive `WithSummary` types
+and methods; existing exported wrappers and method signatures retain their
+source shape and zero-value JSON encoding.
 
 ## Rollback
 

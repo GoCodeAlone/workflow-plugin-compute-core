@@ -35,6 +35,11 @@ type TaskResponse struct {
 }
 
 type TaskList struct {
+	Tasks  []Task      `json:"tasks"`
+	Stalls []TaskStall `json:"stalls,omitempty"`
+}
+
+type TaskListWithSummary struct {
 	Tasks   []Task          `json:"tasks"`
 	Stalls  []TaskStall     `json:"stalls,omitempty"`
 	Summary TaskListSummary `json:"summary"`
@@ -57,6 +62,10 @@ type TaskStall struct {
 }
 
 type ProofList struct {
+	Proofs []ProofReceipt `json:"proofs"`
+}
+
+type ProofListWithSummary struct {
 	Proofs  []ProofReceipt   `json:"proofs"`
 	Summary ProofListSummary `json:"summary"`
 }
@@ -133,9 +142,17 @@ func (c *Client) SubmitTask(ctx context.Context, task Task) (Task, error) {
 }
 
 func (c *Client) ListTasks(ctx context.Context) (TaskList, error) {
-	var out TaskList
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/tasks", nil, http.StatusOK, &out); err != nil {
+	out, err := c.ListTasksWithSummary(ctx)
+	if err != nil {
 		return TaskList{}, err
+	}
+	return TaskList{Tasks: out.Tasks, Stalls: out.Stalls}, nil
+}
+
+func (c *Client) ListTasksWithSummary(ctx context.Context) (TaskListWithSummary, error) {
+	var out TaskListWithSummary
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/tasks", nil, http.StatusOK, &out); err != nil {
+		return TaskListWithSummary{}, err
 	}
 	return out, nil
 }
@@ -236,10 +253,10 @@ func (c *Client) ListProofs(ctx context.Context) ([]ProofReceipt, error) {
 	return out.Proofs, nil
 }
 
-func (c *Client) ListProofsWithSummary(ctx context.Context) (ProofList, error) {
-	var out ProofList
+func (c *Client) ListProofsWithSummary(ctx context.Context) (ProofListWithSummary, error) {
+	var out ProofListWithSummary
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/proofs", nil, http.StatusOK, &out); err != nil {
-		return ProofList{}, err
+		return ProofListWithSummary{}, err
 	}
 	return out, nil
 }

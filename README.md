@@ -43,6 +43,7 @@ The task/proof client covers submission and read-only observation:
 
 - `SubmitTask`
 - `ListTasks`
+- `ListTasksWithSummary`
 - `TaskSnapshot`
 - `ListProofs`
 - `ListProofsWithSummary`

@@ -72,7 +72,7 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/tasks":
-			_ = json.NewEncoder(w).Encode(protocol.TaskList{
+			_ = json.NewEncoder(w).Encode(protocol.TaskListWithSummary{
 				Tasks: []protocol.Task{task},
 				Stalls: []protocol.TaskStall{{
 					TaskID: task.ID,
@@ -82,7 +82,7 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 				Summary: protocol.TaskListSummary{Total: 1, Open: 1, Queued: 1, Stalled: 1},
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/proofs":
-			_ = json.NewEncoder(w).Encode(protocol.ProofList{
+			_ = json.NewEncoder(w).Encode(protocol.ProofListWithSummary{
 				Proofs:  []protocol.ProofReceipt{proof},
 				Summary: protocol.ProofListSummary{Total: 1, Accepted: 1},
 			})
@@ -102,9 +102,6 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 	}
 	if len(list.Tasks) != 1 || list.Tasks[0].ID != task.ID {
 		t.Fatalf("tasks = %+v", list.Tasks)
-	}
-	if list.Summary.Total != 1 || list.Summary.Open != 1 || list.Summary.Queued != 1 || list.Summary.Stalled != 1 {
-		t.Fatalf("task summary = %+v", list.Summary)
 	}
 	snapshot, ok, stalls, err := client.TaskSnapshot(context.Background(), task.ID)
 	if err != nil {
@@ -129,6 +126,28 @@ func TestClientListSnapshotAndProofLookup(t *testing.T) {
 	}
 }
 
+func TestClientLegacyListWrappersPreserveJSONEncoding(t *testing.T) {
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{name: "tasks", value: protocol.TaskList{}, want: `{"tasks":null}`},
+		{name: "proofs", value: protocol.ProofList{}, want: `{"proofs":null}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.value)
+			if err != nil {
+				t.Fatalf("marshal wrapper: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("encoded wrapper = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClientListResponsesMatchLiveServerContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -147,7 +166,7 @@ func TestClientListResponsesMatchLiveServerContract(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	tasks, err := client.ListTasks(t.Context())
+	tasks, err := client.ListTasksWithSummary(t.Context())
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
@@ -178,7 +197,7 @@ func TestClientListResponsesRejectUnknownFields(t *testing.T) {
 			path: "/v1/tasks",
 			body: `{"tasks":[],"summary":{"total":0,"open":0,"queued":0,"stalled":0,"succeeded":0},"unexpected":true}`,
 			call: func(client *protocol.Client) error {
-				_, err := client.ListTasks(t.Context())
+				_, err := client.ListTasksWithSummary(t.Context())
 				return err
 			},
 		},
@@ -187,7 +206,7 @@ func TestClientListResponsesRejectUnknownFields(t *testing.T) {
 			path: "/v1/tasks",
 			body: `{"tasks":[],"summary":{"total":0,"open":0,"queued":0,"stalled":0,"succeeded":0,"unexpected":true}}`,
 			call: func(client *protocol.Client) error {
-				_, err := client.ListTasks(t.Context())
+				_, err := client.ListTasksWithSummary(t.Context())
 				return err
 			},
 		},

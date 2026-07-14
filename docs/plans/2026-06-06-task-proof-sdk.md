@@ -174,6 +174,9 @@ Add tests using `httptest.Server`:
 - `TestClientListResponsesRejectUnknownFields`
   - Adds unknown top-level and nested-summary fields to both list envelopes.
   - Expects strict decoding to reject all four payloads.
+- `TestClientLegacyListWrappersPreserveJSONEncoding`
+  - Marshals zero-value `TaskList` and `ProofList` wrappers.
+  - Expects their pre-summary JSON shapes to remain unchanged.
 - `TestClientRejectsTokenOverNonLoopbackHTTP`
   - Expects `NewClient(ClientConfig{ServerURL:"http://example.test", Token:"x"})`
     to fail.
@@ -190,7 +193,7 @@ Add tests using `httptest.Server`:
 Run:
 
 ```bash
-GOWORK=off go test ./protocol -run 'TestClient(SubmitTaskUsesStrictJSONAndBearerAuth|ListSnapshotAndProofLookup|ListResponsesMatchLiveServerContract|ListResponsesRejectUnknownFields|RejectsTokenOverNonLoopbackHTTP|StatusErrorDoesNotExposeBody|StrictDecodeRejectsUnknownFields)' -count=1
+GOWORK=off go test ./protocol -run 'TestClient(SubmitTaskUsesStrictJSONAndBearerAuth|ListSnapshotAndProofLookup|ListResponsesMatchLiveServerContract|ListResponsesRejectUnknownFields|LegacyListWrappersPreserveJSONEncoding|RejectsTokenOverNonLoopbackHTTP|StatusErrorDoesNotExposeBody|StrictDecodeRejectsUnknownFields)' -count=1
 ```
 
 Expected: FAIL because client config, client methods, wrappers, and status error are not defined.
@@ -217,13 +220,14 @@ Add:
 - `Client`.
 - `NewClient(ClientConfig) (*Client, error)`.
 - `StatusError{Method string, Path string, StatusCode int}`.
-- `TaskResponse`, `TaskList`, `TaskListSummary`, `TaskStall`, `ProofList`, and
-  `ProofListSummary`.
+- `TaskResponse`, `TaskList`, `TaskListWithSummary`, `TaskListSummary`,
+  `TaskStall`, `ProofList`, `ProofListWithSummary`, and `ProofListSummary`.
 - `SubmitTask(ctx context.Context, task Task) (Task, error)`.
 - `ListTasks(ctx context.Context) (TaskList, error)`.
+- `ListTasksWithSummary(ctx context.Context) (TaskListWithSummary, error)`.
 - `TaskSnapshot(ctx context.Context, id string) (Task, bool, []TaskStall, error)`.
 - `ListProofs(ctx context.Context) ([]ProofReceipt, error)`.
-- `ListProofsWithSummary(ctx context.Context) (ProofList, error)`.
+- `ListProofsWithSummary(ctx context.Context) (ProofListWithSummary, error)`.
 - `FindProof(ctx context.Context, taskID string) (ProofReceipt, bool, error)`.
 
 Client rules:
