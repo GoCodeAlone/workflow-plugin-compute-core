@@ -412,17 +412,17 @@ func TestClientListTaskArtifactsRejectsEmptyAndDotTaskIDs(t *testing.T) {
 
 func TestClientTaskArtifactServerFixtureRoundTrip(t *testing.T) {
 	const (
-		ref     = "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json"
+		ref     = "artifact://pool-1/tasks/task-1/proofs/proof-1/run-logs/result.json"
 		payload = `{"status":"captured","items":[1,2]}`
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer fixture-token" {
 			t.Fatalf("authorization = %q", got)
 		}
-		switch r.URL.EscapedPath() {
-		case "/v1/tasks/task-1/artifacts":
-			_, _ = w.Write([]byte(`{"artifacts":[{"task_id":"task-1","proof_id":"proof-1","pool_id":"pool-1","name":"run-logs/result.json","ref":"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json","content_type":"application/json","sha256":"sha256:0e6c1551d69759758a92a684a2071f892dc834d6f292e75ec76645f7dd04e740","size_bytes":35,"created_at":"2026-07-11T12:00:00Z","expires_at":"2026-07-11T13:00:00Z"}]}`))
-		case "/v1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json":
+		switch {
+		case r.Method == http.MethodGet && r.URL.EscapedPath() == "/v1/tasks/task-1/artifacts":
+			_, _ = w.Write([]byte(`{"artifacts":[{"task_id":"task-1","proof_id":"proof-1","pool_id":"pool-1","name":"run-logs/result.json","ref":"artifact://pool-1/tasks/task-1/proofs/proof-1/run-logs/result.json","content_type":"application/json","sha256":"sha256:0e6c1551d69759758a92a684a2071f892dc834d6f292e75ec76645f7dd04e740","size_bytes":35,"created_at":"2026-07-11T12:00:00Z","expires_at":"2026-07-11T13:00:00Z"}]}`))
+		case r.Method == http.MethodGet && r.URL.EscapedPath() == "/v1/tasks/task-1/proofs/proof-1/artifacts/run-logs/result.json":
 			_, _ = w.Write([]byte(payload))
 		default:
 			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.EscapedPath())
@@ -468,11 +468,33 @@ func TestClientDownloadTaskArtifactEscapesCanonicalSegments(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool%id/tasks/task%id/proofs/proof%id/artifacts/run-logs/stderr%.txt", 32)
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool%id/tasks/task%id/proofs/proof%id/run-logs/stderr%.txt", 32)
 	if err != nil {
 		t.Fatalf("download task artifact: %v", err)
 	}
 	if string(got) != "stderr" {
+		t.Fatalf("download = %q", got)
+	}
+}
+
+func TestClientDownloadTaskArtifactPreservesLeadingArtifactsNameSegment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.EscapedPath(), "/v1/tasks/task-1/proofs/proof-1/artifacts/artifacts/result.json"; got != want {
+			t.Fatalf("escaped path = %q, want %q", got, want)
+		}
+		_, _ = w.Write([]byte("artifact"))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.json", 32)
+	if err != nil {
+		t.Fatalf("download task artifact: %v", err)
+	}
+	if string(got) != "artifact" {
 		t.Fatalf("download = %q", got)
 	}
 }
@@ -491,17 +513,24 @@ func TestClientDownloadTaskArtifactRejectsUnsafeRefsAndLimits(t *testing.T) {
 
 	refs := []string{
 		"https://example.test/private",
-		"artifact://pool-1/tasks/task-1/proofs/proof-1/result.json",
-		"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/../secret",
-		"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/bad\\name",
-		"artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/name?token=secret",
+		"artifact:///tasks/task-1/proofs/proof-1/result.json",
+		"artifact://pool-1/tasks//proofs/proof-1/result.json",
+		"artifact://pool-1/tasks/task-1/proofs//result.json",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/run-logs//result.json",
+		"artifact://pool-1/task/task-1/proofs/proof-1/result.json",
+		"artifact://pool-1/tasks/task-1/proof/proof-1/result.json",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/../secret",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/bad\\name",
+		"artifact://pool-1/tasks/task-1/proofs/proof-1/name?token=secret",
 	}
 	for _, ref := range refs {
 		if got, err := client.DownloadTaskArtifact(t.Context(), ref, 32); err == nil || got != nil {
 			t.Errorf("DownloadTaskArtifact(%q) = %q, %v; want nil, error", ref, got, err)
 		}
 	}
-	if got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.json", 0); err == nil || got != nil {
+	if got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/result.json", 0); err == nil || got != nil {
 		t.Fatalf("nonpositive limit = %q, %v; want nil, error", got, err)
 	}
 	if requests != 0 {
@@ -519,7 +548,7 @@ func TestClientDownloadTaskArtifactRejectsMaxBytesPlusOneWithoutPartialData(t *t
 		t.Fatalf("new client: %v", err)
 	}
 
-	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.txt", 4)
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/result.txt", 4)
 	if err == nil || !strings.Contains(err.Error(), "maxBytes") {
 		t.Fatalf("error = %v, want maxBytes rejection", err)
 	}
@@ -538,7 +567,7 @@ func TestClientDownloadTaskArtifactHandlesMaxInt64LimitWithoutOverflow(t *testin
 		t.Fatalf("new client: %v", err)
 	}
 
-	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.txt", math.MaxInt64)
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/result.txt", math.MaxInt64)
 	if err != nil {
 		t.Fatalf("download task artifact: %v", err)
 	}
@@ -610,7 +639,7 @@ func TestClientAgentLeaseArtifactStatusErrorsDoNotExposeBody(t *testing.T) {
 			return err
 		},
 		"download": func(client *protocol.Client) error {
-			_, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.json", 1024)
+			_, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/result.json", 1024)
 			return err
 		},
 	}

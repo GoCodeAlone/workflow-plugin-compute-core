@@ -333,16 +333,16 @@ func taskArtifactRefParts(ref string) (poolID, taskID, proofID, name string, err
 		return "", "", "", "", errors.New("artifact ref must use artifact://")
 	}
 	parts := strings.Split(strings.TrimPrefix(ref, "artifact://"), "/")
-	if len(parts) < 7 || parts[1] != "tasks" || parts[3] != "proofs" || parts[5] != "artifacts" {
-		return "", "", "", "", errors.New("artifact ref must use artifact://<pool>/tasks/<task>/proofs/<proof>/artifacts/<name>")
+	if len(parts) < 6 || parts[1] != "tasks" || parts[3] != "proofs" {
+		return "", "", "", "", errors.New("artifact ref must use artifact://<pool>/tasks/<task>/proofs/<proof>/<name>")
 	}
-	dataSegments := append([]string{parts[0], parts[2], parts[4]}, parts[6:]...)
+	dataSegments := append([]string{parts[0], parts[2], parts[4]}, parts[5:]...)
 	for _, segment := range dataSegments {
 		if segment == "" || segment == "." || segment == ".." || strings.ContainsAny(segment, "\\\x00\r\n\t ?#") {
 			return "", "", "", "", errors.New("artifact ref contains unsafe segment")
 		}
 	}
-	return parts[0], parts[2], parts[4], strings.Join(parts[6:], "/"), nil
+	return parts[0], parts[2], parts[4], strings.Join(parts[5:], "/"), nil
 }
 
 func isLoopbackHost(host string) bool {
