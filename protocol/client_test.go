@@ -477,6 +477,28 @@ func TestClientDownloadTaskArtifactEscapesCanonicalSegments(t *testing.T) {
 	}
 }
 
+func TestClientDownloadTaskArtifactPreservesLeadingArtifactsNameSegment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.EscapedPath(), "/v1/tasks/task-1/proofs/proof-1/artifacts/artifacts/result.json"; got != want {
+			t.Fatalf("escaped path = %q, want %q", got, want)
+		}
+		_, _ = w.Write([]byte("artifact"))
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	got, err := client.DownloadTaskArtifact(t.Context(), "artifact://pool-1/tasks/task-1/proofs/proof-1/artifacts/result.json", 32)
+	if err != nil {
+		t.Fatalf("download task artifact: %v", err)
+	}
+	if string(got) != "artifact" {
+		t.Fatalf("download = %q", got)
+	}
+}
+
 func TestClientDownloadTaskArtifactRejectsUnsafeRefsAndLimits(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
