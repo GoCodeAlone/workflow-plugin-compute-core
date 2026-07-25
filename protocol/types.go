@@ -3956,14 +3956,18 @@ func (p RunLogLeasePolicy) Validate() error {
 		return errors.New("run_log_policy policy_hash must use sha256 digest")
 	}
 	if p.ProviderEnrollmentID != "" {
-		if len(p.ProviderEnrollmentID) > 256 {
-			return errors.New("run_log_policy provider_enrollment_id must not exceed 256 bytes")
-		}
-		if err := validateIdentifier("run_log_policy provider_enrollment_id", p.ProviderEnrollmentID); err != nil {
+		if err := ValidateRunLogProviderEnrollmentID(p.ProviderEnrollmentID); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func ValidateRunLogProviderEnrollmentID(id string) error {
+	if len(id) > 256 {
+		return errors.New("run_log_policy provider_enrollment_id must not exceed 256 bytes")
+	}
+	return validateIdentifier("run_log_policy provider_enrollment_id", id)
 }
 
 func validateRunLogPolicyRef(ref string) error {

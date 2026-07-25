@@ -239,6 +239,15 @@ func TestV979_RunLogLeasePolicyRejectsExplicitUnversionedJSON(t *testing.T) {
 	}
 }
 
+func TestV979_ValidateRunLogProviderEnrollmentID(t *testing.T) {
+	if err := protocol.ValidateRunLogProviderEnrollmentID("bmw-product-capture"); err != nil {
+		t.Fatalf("valid provider enrollment id rejected: %v", err)
+	}
+	if err := protocol.ValidateRunLogProviderEnrollmentID("bmw/product-capture"); err == nil {
+		t.Fatal("noncanonical provider enrollment id accepted")
+	}
+}
+
 func validTask(t *testing.T) protocol.Task {
 	t.Helper()
 	input := mustTaskRawMessage(t, map[string]any{
