@@ -182,6 +182,9 @@ func TestV979_RunLogLeasePolicyValidatesVersionedHostAuthorization(t *testing.T)
 		{name: "nonpositive retention", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, PolicyRef: "client:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "retention_seconds"},
 		{name: "missing policy ref", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
 		{name: "invalid policy hash", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw", PolicyHash: "bad"}, want: "policy_hash"},
+		{name: "unknown policy ref authority", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "tenant:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
+		{name: "malformed provider policy ref", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "provider:product-capture", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
+		{name: "invalid provider enrollment id", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64), ProviderEnrollmentID: "bmw/product-capture"}, want: "provider_enrollment_id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.policy.Validate()
@@ -192,9 +195,31 @@ func TestV979_RunLogLeasePolicyValidatesVersionedHostAuthorization(t *testing.T)
 	}
 
 	lease := validLease(t)
+	lease.RunLogPolicy = valid
+	if err := lease.Validate(); err == nil || !strings.Contains(err.Error(), protocol.CapabilityTagRunLogLeasePolicyV1) {
+		t.Fatalf("lease accepted run-log policy without capability tag: %v", err)
+	}
+	lease.CapabilitySnapshot.CapabilityTags = append(lease.CapabilitySnapshot.CapabilityTags, protocol.CapabilityTagRunLogLeasePolicyV1)
+	if err := lease.Validate(); err != nil {
+		t.Fatalf("lease rejected supported run-log policy: %v", err)
+	}
 	lease.RunLogPolicy = protocol.RunLogLeasePolicy{Version: "v2"}
 	if err := lease.Validate(); err == nil || !strings.Contains(err.Error(), "run_log_policy") {
 		t.Fatalf("lease accepted invalid run-log policy: %v", err)
+	}
+}
+
+func TestV979_RunLogLeasePolicyRejectsExplicitUnversionedJSON(t *testing.T) {
+	for _, raw := range []string{`{}`, `null`} {
+		t.Run(raw, func(t *testing.T) {
+			var policy protocol.RunLogLeasePolicy
+			if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+				t.Fatalf("unmarshal policy: %v", err)
+			}
+			if err := policy.Validate(); err == nil || !strings.Contains(err.Error(), "version") {
+				t.Fatalf("Validate() = %v, want explicit unversioned policy rejection", err)
+			}
+		})
 	}
 }
 

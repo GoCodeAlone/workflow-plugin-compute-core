@@ -3912,11 +3912,27 @@ type RunLogLeasePolicy struct {
 	PolicyHash           string `json:"policy_hash,omitempty"`
 	ProviderEnrollmentID string `json:"provider_enrollment_id,omitempty"`
 	RequestAdjusted      bool   `json:"request_adjusted,omitempty"`
+	present              bool
+}
+
+func (p *RunLogLeasePolicy) UnmarshalJSON(data []byte) error {
+	type wirePolicy RunLogLeasePolicy
+	decoded := wirePolicy{}
+	if !bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&decoded); err != nil {
+			return err
+		}
+	}
+	*p = RunLogLeasePolicy(decoded)
+	p.present = true
+	return nil
 }
 
 func (p RunLogLeasePolicy) Validate() error {
 	if p.Version == "" {
-		if p.PreserveFullLogs || p.RetentionSeconds != 0 || p.PolicyRef != "" || p.PolicyHash != "" || p.ProviderEnrollmentID != "" || p.RequestAdjusted {
+		if p.present || p.PreserveFullLogs || p.RetentionSeconds != 0 || p.PolicyRef != "" || p.PolicyHash != "" || p.ProviderEnrollmentID != "" || p.RequestAdjusted {
 			return errors.New("run_log_policy version is required when policy fields are set")
 		}
 		return nil
@@ -3933,11 +3949,52 @@ func (p RunLogLeasePolicy) Validate() error {
 	if p.RetentionSeconds <= 0 {
 		return errors.New("run_log_policy retention_seconds must be positive")
 	}
-	if strings.TrimSpace(p.PolicyRef) == "" {
-		return errors.New("run_log_policy policy_ref is required")
+	if err := validateRunLogPolicyRef(p.PolicyRef); err != nil {
+		return err
 	}
 	if !validSHA256Digest(p.PolicyHash) {
 		return errors.New("run_log_policy policy_hash must use sha256 digest")
+	}
+	if p.ProviderEnrollmentID != "" {
+		if len(p.ProviderEnrollmentID) > 256 {
+			return errors.New("run_log_policy provider_enrollment_id must not exceed 256 bytes")
+		}
+		if err := validateIdentifier("run_log_policy provider_enrollment_id", p.ProviderEnrollmentID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRunLogPolicyRef(ref string) error {
+	if len(ref) > 512 {
+		return errors.New("run_log_policy policy_ref must not exceed 512 bytes")
+	}
+	if ref == "global" {
+		return nil
+	}
+	authority, subject, ok := strings.Cut(ref, ":")
+	if !ok {
+		return errors.New(`run_log_policy policy_ref must be "global" or use provider:, customer:, or client: authority`)
+	}
+	switch authority {
+	case "client", "customer":
+		if err := validateIdentifier("run_log_policy policy_ref", subject); err != nil {
+			return err
+		}
+	case "provider":
+		pluginID, providerID, ok := strings.Cut(subject, "/")
+		if !ok || strings.Contains(providerID, "/") {
+			return errors.New("run_log_policy provider policy_ref must identify plugin/provider")
+		}
+		if err := validateIdentifier("run_log_policy policy_ref plugin", pluginID); err != nil {
+			return err
+		}
+		if err := validateIdentifier("run_log_policy policy_ref provider", providerID); err != nil {
+			return err
+		}
+	default:
+		return errors.New(`run_log_policy policy_ref must be "global" or use provider:, customer:, or client: authority`)
 	}
 	return nil
 }
@@ -4103,6 +4160,9 @@ func (l Lease) Validate() error {
 	if err := l.RunLogPolicy.Validate(); err != nil {
 		errs = append(errs, err)
 	}
+	if l.RunLogPolicy.Version != "" && !containsCapabilityTag(l.CapabilitySnapshot.CapabilityTags, CapabilityTagRunLogLeasePolicyV1) {
+		errs = append(errs, fmt.Errorf("capability_snapshot.capability_tags must include %q for versioned run_log_policy", CapabilityTagRunLogLeasePolicyV1))
+	}
 	if err := l.ResiduePolicy.Validate(ResiduePolicyValidation{
 		RequireSessionKey:          true,
 		RequireExplicitWorkerBound: true,
@@ -4120,6 +4180,15 @@ func (l Lease) Validate() error {
 		errs = append(errs, errors.New("expires_at must be after leased_at"))
 	}
 	return errors.Join(errs...)
+}
+
+func containsCapabilityTag(tags []string, want string) bool {
+	for _, tag := range tags {
+		if tag == want {
+			return true
+		}
+	}
+	return false
 }
 
 type ProviderContract struct {
