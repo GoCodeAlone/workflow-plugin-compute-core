@@ -4148,7 +4148,9 @@ func (l Lease) Validate() error {
 	if strings.TrimSpace(l.CapabilitySnapshot.Arch) == "" {
 		errs = append(errs, errors.New("capability_snapshot.arch is required"))
 	}
-	errs = append(errs, validateProviderArtifactSpecs("provider_artifact_specs", l.ProviderArtifactSpecs, nil)...)
+	if err := ValidateProviderArtifactSpecs(l.ProviderArtifactSpecs); err != nil {
+		errs = append(errs, err)
+	}
 	if err := l.NetworkPolicy.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("network_policy: %w", err))
 	}
@@ -4474,6 +4476,10 @@ func validateProviderArtifactSpecs(field string, specs []ProviderArtifactSpec, l
 		}
 	}
 	return errs
+}
+
+func ValidateProviderArtifactSpecs(specs []ProviderArtifactSpec) error {
+	return errors.Join(validateProviderArtifactSpecs("provider_artifact_specs", specs, nil)...)
 }
 
 func (o ProviderOperation) NormalizedArtifactSpecs() []ProviderArtifactSpec {

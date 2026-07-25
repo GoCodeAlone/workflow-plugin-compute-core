@@ -154,6 +154,22 @@ func TestLeaseRejectsInvalidProviderArtifactSpecs(t *testing.T) {
 	}
 }
 
+func TestValidateProviderArtifactSpecsUsesLeaseWireRules(t *testing.T) {
+	err := protocol.ValidateProviderArtifactSpecs([]protocol.ProviderArtifactSpec{{
+		Name:        "results/output",
+		ContentType: "application/json\n",
+		MaxBytes:    -1,
+	}})
+	if err == nil {
+		t.Fatal("expected malformed provider artifact specs to fail")
+	}
+	for _, want := range []string{"provider_artifact_specs[0].name", "content_type", "max_bytes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ValidateProviderArtifactSpecs() = %v, want %q", err, want)
+		}
+	}
+}
+
 func TestV979_RunLogLeasePolicyValidatesVersionedHostAuthorization(t *testing.T) {
 	valid := protocol.RunLogLeasePolicy{
 		Version:              protocol.RunLogLeasePolicyVersionV1,
