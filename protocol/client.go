@@ -170,6 +170,11 @@ func (c *Client) ListLeases(ctx context.Context) ([]Lease, error) {
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/leases", nil, http.StatusOK, &out); err != nil {
 		return nil, err
 	}
+	for i, lease := range out.Leases {
+		if err := lease.Validate(); err != nil {
+			return nil, fmt.Errorf("leases[%d]: %w", i, err)
+		}
+	}
 	return out.Leases, nil
 }
 

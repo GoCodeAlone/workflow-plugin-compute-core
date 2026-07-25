@@ -623,6 +623,24 @@ func TestClientListLeasesStrictlyDecodesProviderArtifactSpecs(t *testing.T) {
 	}
 }
 
+func TestV979_ClientListLeasesRejectsInvalidRunLogPolicy(t *testing.T) {
+	lease := validLease(t)
+	lease.CapabilitySnapshot.CapabilityTags = []string{protocol.CapabilityTagRunLogLeasePolicyV1}
+	lease.RunLogPolicy = protocol.RunLogLeasePolicy{Version: "v2"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"leases": []protocol.Lease{lease}})
+	}))
+	defer server.Close()
+	client, err := protocol.NewClient(protocol.ClientConfig{ServerURL: server.URL})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	if _, err := client.ListLeases(t.Context()); err == nil || !strings.Contains(err.Error(), "leases[0]") || !strings.Contains(err.Error(), "run_log_policy") {
+		t.Fatalf("ListLeases error = %v, want indexed semantic validation error", err)
+	}
+}
+
 func TestClientAgentLeaseArtifactStatusErrorsDoNotExposeBody(t *testing.T) {
 	const sentinel = "private-read-response"
 	tests := map[string]func(*protocol.Client) error{
