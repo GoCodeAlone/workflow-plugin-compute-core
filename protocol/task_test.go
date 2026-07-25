@@ -201,6 +201,9 @@ func TestV979_RunLogLeasePolicyValidatesVersionedHostAuthorization(t *testing.T)
 		{name: "unknown policy ref authority", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "tenant:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
 		{name: "malformed provider policy ref", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "provider:product-capture", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
 		{name: "invalid provider enrollment id", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64), ProviderEnrollmentID: "bmw/product-capture"}, want: "provider_enrollment_id"},
+		{name: "control byte in policy ref", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw\x00admin", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
+		{name: "unicode in policy ref", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw\u200badmin", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
+		{name: "control byte in enrollment id", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64), ProviderEnrollmentID: "bmw\x00admin"}, want: "provider_enrollment_id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.policy.Validate()
@@ -243,8 +246,10 @@ func TestV979_ValidateRunLogProviderEnrollmentID(t *testing.T) {
 	if err := protocol.ValidateRunLogProviderEnrollmentID("bmw-product-capture"); err != nil {
 		t.Fatalf("valid provider enrollment id rejected: %v", err)
 	}
-	if err := protocol.ValidateRunLogProviderEnrollmentID("bmw/product-capture"); err == nil {
-		t.Fatal("noncanonical provider enrollment id accepted")
+	for _, id := range []string{"bmw/product-capture", "bmw\x00admin", "bmw\u200badmin"} {
+		if err := protocol.ValidateRunLogProviderEnrollmentID(id); err == nil {
+			t.Fatalf("noncanonical provider enrollment id %q accepted", id)
+		}
 	}
 }
 

@@ -3964,10 +3964,7 @@ func (p RunLogLeasePolicy) Validate() error {
 }
 
 func ValidateRunLogProviderEnrollmentID(id string) error {
-	if len(id) > 256 {
-		return errors.New("run_log_policy provider_enrollment_id must not exceed 256 bytes")
-	}
-	return validateIdentifier("run_log_policy provider_enrollment_id", id)
+	return validateRunLogAuthorityIdentifier("run_log_policy provider_enrollment_id", id)
 }
 
 func validateRunLogPolicyRef(ref string) error {
@@ -3983,7 +3980,7 @@ func validateRunLogPolicyRef(ref string) error {
 	}
 	switch authority {
 	case "client", "customer":
-		if err := validateIdentifier("run_log_policy policy_ref", subject); err != nil {
+		if err := validateRunLogAuthorityIdentifier("run_log_policy policy_ref", subject); err != nil {
 			return err
 		}
 	case "provider":
@@ -3991,14 +3988,35 @@ func validateRunLogPolicyRef(ref string) error {
 		if !ok || strings.Contains(providerID, "/") {
 			return errors.New("run_log_policy provider policy_ref must identify plugin/provider")
 		}
-		if err := validateIdentifier("run_log_policy policy_ref plugin", pluginID); err != nil {
+		if err := validateRunLogAuthorityIdentifier("run_log_policy policy_ref plugin", pluginID); err != nil {
 			return err
 		}
-		if err := validateIdentifier("run_log_policy policy_ref provider", providerID); err != nil {
+		if err := validateRunLogAuthorityIdentifier("run_log_policy policy_ref provider", providerID); err != nil {
 			return err
 		}
 	default:
 		return errors.New(`run_log_policy policy_ref must be "global" or use provider:, customer:, or client: authority`)
+	}
+	return nil
+}
+
+func validateRunLogAuthorityIdentifier(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	if len(value) > 256 {
+		return fmt.Errorf("%s must not exceed 256 bytes", name)
+	}
+	for i := range len(value) {
+		ch := value[i]
+		isAlphaNumeric := ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
+		if isAlphaNumeric {
+			continue
+		}
+		if i > 0 && (ch == '-' || ch == '_' || ch == '.' || ch == '@' || ch == '+') {
+			continue
+		}
+		return fmt.Errorf("%s must use bounded ASCII identifier syntax", name)
 	}
 	return nil
 }
