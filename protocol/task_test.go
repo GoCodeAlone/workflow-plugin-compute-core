@@ -154,6 +154,50 @@ func TestLeaseRejectsInvalidProviderArtifactSpecs(t *testing.T) {
 	}
 }
 
+func TestV979_RunLogLeasePolicyValidatesVersionedHostAuthorization(t *testing.T) {
+	valid := protocol.RunLogLeasePolicy{
+		Version:              protocol.RunLogLeasePolicyVersionV1,
+		PreserveFullLogs:     true,
+		RetentionSeconds:     600,
+		PolicyRef:            "client:bmw",
+		PolicyHash:           "sha256:" + strings.Repeat("a", 64),
+		ProviderEnrollmentID: "bmw-product-capture",
+		RequestAdjusted:      true,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid run-log lease policy rejected: %v", err)
+	}
+	if err := (protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1}).Validate(); err != nil {
+		t.Fatalf("versioned disabled run-log lease policy rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		policy protocol.RunLogLeasePolicy
+		want   string
+	}{
+		{name: "fields without version", policy: protocol.RunLogLeasePolicy{PreserveFullLogs: true}, want: "version"},
+		{name: "unknown version", policy: protocol.RunLogLeasePolicy{Version: "v2"}, want: "version"},
+		{name: "disabled with authority", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PolicyRef: "client:bmw"}, want: "disabled"},
+		{name: "nonpositive retention", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, PolicyRef: "client:bmw", PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "retention_seconds"},
+		{name: "missing policy ref", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyHash: "sha256:" + strings.Repeat("a", 64)}, want: "policy_ref"},
+		{name: "invalid policy hash", policy: protocol.RunLogLeasePolicy{Version: protocol.RunLogLeasePolicyVersionV1, PreserveFullLogs: true, RetentionSeconds: 600, PolicyRef: "client:bmw", PolicyHash: "bad"}, want: "policy_hash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.policy.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate() = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	lease := validLease(t)
+	lease.RunLogPolicy = protocol.RunLogLeasePolicy{Version: "v2"}
+	if err := lease.Validate(); err == nil || !strings.Contains(err.Error(), "run_log_policy") {
+		t.Fatalf("lease accepted invalid run-log policy: %v", err)
+	}
+}
+
 func validTask(t *testing.T) protocol.Task {
 	t.Helper()
 	input := mustTaskRawMessage(t, map[string]any{
