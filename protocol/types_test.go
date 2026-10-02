@@ -77,6 +77,30 @@ func TestTaskArtifactExactJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTaskArtifactDecodesRunLogPolicyMetadata(t *testing.T) {
+	const fixture = `{"task_id":"task-1","proof_id":"proof-1","pool_id":"pool-1","name":"run-logs/stderr.txt","ref":"artifact://pool-1/tasks/task-1/proofs/proof-1/run-logs/stderr.txt","content_type":"text/plain","sha256":"sha256:fixture","size_bytes":34,"created_at":"2026-07-11T12:00:00Z","expires_at":"2026-07-11T13:00:00Z","artifact_class":"run-log","visibility":"private","uploader_kind":"agent","uploader_id":"worker-1","policy_source":"task-label","policy_ref":"workflow.compute.run_logs.preserve","policy_hash":"sha256:policy","provider_enrollment_id":"enrollment-1","policy_retention_seconds":600,"policy_request_adjusted":true,"truncated":true,"original_size_bytes":4096}`
+	var artifact protocol.TaskArtifact
+	if err := protocol.DecodeStrict(strings.NewReader(fixture), &artifact); err != nil {
+		t.Fatalf("strict decode task artifact policy metadata: %v", err)
+	}
+	got, err := json.Marshal(artifact)
+	if err != nil {
+		t.Fatalf("marshal task artifact policy metadata: %v", err)
+	}
+	if string(got) != fixture {
+		t.Fatalf("task artifact policy metadata JSON = %s, want %s", got, fixture)
+	}
+}
+
+func TestTaskArtifactRejectsUnknownRunLogPolicyMetadata(t *testing.T) {
+	const fixture = `{"task_id":"task-1","proof_id":"proof-1","pool_id":"pool-1","name":"run-logs/stderr.txt","ref":"artifact://pool-1/tasks/task-1/proofs/proof-1/run-logs/stderr.txt","sha256":"sha256:fixture","size_bytes":34,"created_at":"2026-07-11T12:00:00Z","expires_at":"2026-07-11T13:00:00Z","artifact_class":"run-log","unexpected_policy_field":true}`
+	var artifact protocol.TaskArtifact
+	err := protocol.DecodeStrict(strings.NewReader(fixture), &artifact)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "unexpected_policy_field"`) {
+		t.Fatalf("strict decode error = %v, want unknown nested task artifact field", err)
+	}
+}
+
 func TestRuntimeDescriptorProducesExecutorRef(t *testing.T) {
 	descriptor := protocol.RuntimeDescriptor{
 		Name:                  "sandboxed-command",
