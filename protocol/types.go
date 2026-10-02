@@ -4121,16 +4121,28 @@ func FindQueuedTask(tasks []Task, orgID, poolID string) (Task, bool) {
 }
 
 type TaskArtifact struct {
-	TaskID      string    `json:"task_id"`
-	ProofID     string    `json:"proof_id"`
-	PoolID      string    `json:"pool_id"`
-	Name        string    `json:"name"`
-	Ref         string    `json:"ref"`
-	ContentType string    `json:"content_type,omitempty"`
-	SHA256      string    `json:"sha256"`
-	SizeBytes   int64     `json:"size_bytes"`
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	TaskID                 string           `json:"task_id"`
+	ProofID                string           `json:"proof_id"`
+	PoolID                 string           `json:"pool_id"`
+	Name                   string           `json:"name"`
+	Ref                    string           `json:"ref"`
+	ContentType            string           `json:"content_type,omitempty"`
+	SHA256                 string           `json:"sha256"`
+	SizeBytes              int64            `json:"size_bytes"`
+	CreatedAt              time.Time        `json:"created_at"`
+	ExpiresAt              time.Time        `json:"expires_at"`
+	ArtifactClass          string           `json:"artifact_class,omitempty"`
+	Visibility             AccessVisibility `json:"visibility,omitempty"`
+	UploaderKind           string           `json:"uploader_kind,omitempty"`
+	UploaderID             string           `json:"uploader_id,omitempty"`
+	PolicySource           string           `json:"policy_source,omitempty"`
+	PolicyRef              string           `json:"policy_ref,omitempty"`
+	PolicyHash             string           `json:"policy_hash,omitempty"`
+	ProviderEnrollmentID   string           `json:"provider_enrollment_id,omitempty"`
+	PolicyRetentionSeconds int              `json:"policy_retention_seconds,omitempty"`
+	PolicyRequestAdjusted  bool             `json:"policy_request_adjusted,omitempty"`
+	Truncated              bool             `json:"truncated,omitempty"`
+	OriginalSizeBytes      int64            `json:"original_size_bytes,omitempty"`
 }
 
 type Lease struct {
