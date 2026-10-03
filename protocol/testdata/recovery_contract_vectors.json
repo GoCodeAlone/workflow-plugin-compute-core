@@ -1,0 +1,533 @@
+{
+  "validation_time": "2026-10-03T12:00:00Z",
+  "public_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "wrong_public_key": "E5j2LG0aRXxRumpLXz29L2n8qTIWIY3ImX5Ba9F9k8o=",
+  "manifest": {
+    "message": {
+      "protocol_version": "compute.v1alpha1",
+      "schema_version": "compute-bootstrap-manifest.v1",
+      "version": "v1.0.0",
+      "server_origin": "https://compute.example.test",
+      "wfctl_version": "v0.86.0",
+      "wfctl_assets": [
+        {
+          "os": "linux",
+          "arch": "amd64",
+          "asset": {
+            "url": "https://releases.example.test/immutable/artifact",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ],
+      "plugin_compute_version": "v1.0.0",
+      "plugin_compute_archive": {
+        "url": "https://releases.example.test/immutable/artifact",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "bootstrap": {
+        "url": "https://releases.example.test/immutable/artifact",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "package_id": "agent-core-linux-amd64",
+      "package_version": "v1.0.0",
+      "package_manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bootstrap_epoch": 1,
+      "package_epoch": 1,
+      "keyset_epoch": 1,
+      "keyset_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "package_signing_keys": [
+        {
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "public_key": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw="
+        }
+      ],
+      "expires_at": "2026-10-03T13:00:00Z"
+    },
+    "signing_base64": "eyJwcm90b2NvbF92ZXJzaW9uIjoiY29tcHV0ZS52MWFscGhhMSIsInNjaGVtYV92ZXJzaW9uIjoiY29tcHV0ZS1ib290c3RyYXAtbWFuaWZlc3QudjEiLCJ2ZXJzaW9uIjoidjEuMC4wIiwic2VydmVyX29yaWdpbiI6Imh0dHBzOi8vY29tcHV0ZS5leGFtcGxlLnRlc3QiLCJ3ZmN0bF92ZXJzaW9uIjoidjAuODYuMCIsIndmY3RsX2Fzc2V0cyI6W3sib3MiOiJsaW51eCIsImFyY2giOiJhbWQ2NCIsImFzc2V0Ijp7InVybCI6Imh0dHBzOi8vcmVsZWFzZXMuZXhhbXBsZS50ZXN0L2ltbXV0YWJsZS9hcnRpZmFjdCIsImRpZ2VzdCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIn19XSwicGx1Z2luX2NvbXB1dGVfdmVyc2lvbiI6InYxLjAuMCIsInBsdWdpbl9jb21wdXRlX2FyY2hpdmUiOnsidXJsIjoiaHR0cHM6Ly9yZWxlYXNlcy5leGFtcGxlLnRlc3QvaW1tdXRhYmxlL2FydGlmYWN0IiwiZGlnZXN0Ijoic2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEifSwiYm9vdHN0cmFwIjp7InVybCI6Imh0dHBzOi8vcmVsZWFzZXMuZXhhbXBsZS50ZXN0L2ltbXV0YWJsZS9hcnRpZmFjdCIsImRpZ2VzdCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIn0sInBhY2thZ2VfaWQiOiJhZ2VudC1jb3JlLWxpbnV4LWFtZDY0IiwicGFja2FnZV92ZXJzaW9uIjoidjEuMC4wIiwicGFja2FnZV9tYW5pZmVzdF9kaWdlc3QiOiJzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImJvb3RzdHJhcF9lcG9jaCI6MSwicGFja2FnZV9lcG9jaCI6MSwia2V5c2V0X2Vwb2NoIjoxLCJrZXlzZXRfZGlnZXN0Ijoic2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJwYWNrYWdlX3NpZ25pbmdfa2V5cyI6W3sia2V5X2lkIjoic2hhMjU2OmZlODEyYzEyZjNhYjRjZTZhYzVkYjY5YWMzNTJmOTA2Y2IxYjExZWY0M2ZiMzNlMjUyZWY3ZmY1NTIyNjM4ODkiLCJwdWJsaWNfa2V5IjoiNmtwc1krS2NVZ3ErOVZCN0V5N0YrWlZIZHE2K3ZudVNRaDdxYVJSRzBpdz0ifV0sImV4cGlyZXNfYXQiOiIyMDI2LTEwLTAzVDEzOjAwOjAwWiJ9",
+    "signing_digest": "sha256:ef14acb29a8414ed7dd581442a2082cf1b4ca46a933253f9efd277e8f63a7de8"
+  },
+  "manifest_signature": {
+    "algorithm": "ed25519",
+    "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+    "value": "P9krVAvk+PM1pKhem5xnEZO6dtDgK0cztp+XbLHUQvGMFZA8/jnbcd1HBzlGYnJrXqwBYwy3Ot6+8UYCjTuuAQ=="
+  },
+  "receipt": {
+    "message": {
+      "protocol_version": "compute.v1alpha1",
+      "receipt_id": "receipt-1",
+      "challenge": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+      "invite_id": "invite-1",
+      "install_session_id": "session-1",
+      "worker_id": "worker-1",
+      "package_id": "agent-core-linux-amd64",
+      "package_version": "v1.0.0",
+      "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bootstrap_epoch": 1,
+      "package_epoch": 1,
+      "keyset_epoch": 1,
+      "launcher_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "slot_id": "A",
+      "slot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "service_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "service_mode": "systemd-user",
+      "started_pid": 123,
+      "heartbeat_id": "heartbeat-1",
+      "heartbeat_at": "2026-10-03T11:59:00Z",
+      "cloud_final_unit": "cloud-final.service",
+      "scrub_unit": "compute-scrub.service",
+      "wrapper_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scan_hit_count": 0,
+      "code_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "completed_at": "2026-10-03T12:00:00Z",
+      "expires_at": "2026-10-03T13:00:00Z",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+        "value": "Y0PvaUyPwev2WtpFfxvdfQasXyyRzS/t9w09I9KwQX5Rgnba9rYJlOnnPsCeaZouhJB9Tb0ERGKovKu+aCjmCg=="
+      }
+    },
+    "signing_base64": "Ch5hZ2VudC1zZXR1cC1pbnN0YWxsLXJlY2VpcHQudjESEGNvbXB1dGUudjFhbHBoYTEaCXJlY2VpcHQtMSIsQ1FrSkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRa0pDUWtKQ1FrSkNRaz0qCGludml0ZS0xMglzZXNzaW9uLTE6CHdvcmtlci0xQhZhZ2VudC1jb3JlLWxpbnV4LWFtZDY0SgZ2MS4wLjBSR3NoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhWkdzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWABaAFwAXpHc2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWGCAQFBigFHc2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWGSAUdzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYZoBDHN5c3RlbWQtdXNlcqABe6oBC2hlYXJ0YmVhdC0xsAGA0Nyx5eTA7Ri6ARNjbG91ZC1maW5hbC5zZXJ2aWNlwgEVY29tcHV0ZS1zY3J1Yi5zZXJ2aWNlygFHc2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWHaAUdzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYeABgID688TmwO0Y6AGAwNz5p8/B7Rg=",
+    "signing_digest": "sha256:58576c7e80ba3f0eb88de2d01cabbc3a835e6bc0145221d20c1d412049e0f283"
+  },
+  "receipt_binding": {
+    "challenge": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+    "invite_id": "invite-1",
+    "install_session_id": "session-1",
+    "worker_id": "worker-1",
+    "package_id": "agent-core-linux-amd64",
+    "package_version": "v1.0.0",
+    "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bootstrap_epoch": 1,
+    "package_epoch": 1,
+    "keyset_epoch": 1,
+    "expires_at": "2026-10-03T13:00:00Z"
+  },
+  "artifact": {
+    "message": {
+      "protocol_version": "compute.v1alpha1",
+      "transaction_id": "transaction-1",
+      "worker_id": "worker-1",
+      "plugin_id": "workflow-plugin-example",
+      "component": "provider-binary",
+      "component_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ref": "/api/artifacts/config-1",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "max_bytes": 4096,
+      "envelope_key_id": "lifecycle-key-1",
+      "expires_at": "2026-10-03T13:00:00Z",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+        "value": "r0Fy+6bZXIfLUTSwgQk15GXvkFc4cf+SFadkFBxFnuZTjOO2aVoB3fJj2MJffMhYSEYuYK4YAPdtt0jzxbTFCg=="
+      }
+    },
+    "signing_base64": "eyJkb21haW4iOiJtYW5hZ2VkLWxpZmVjeWNsZS1hcnRpZmFjdC52MSIsInBheWxvYWQiOnsicHJvdG9jb2xfdmVyc2lvbiI6ImNvbXB1dGUudjFhbHBoYTEiLCJ0cmFuc2FjdGlvbl9pZCI6InRyYW5zYWN0aW9uLTEiLCJ3b3JrZXJfaWQiOiJ3b3JrZXItMSIsInBsdWdpbl9pZCI6IndvcmtmbG93LXBsdWdpbi1leGFtcGxlIiwiY29tcG9uZW50IjoicHJvdmlkZXItYmluYXJ5IiwiY29tcG9uZW50X2RpZ2VzdCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwicmVmIjoiL2FwaS9hcnRpZmFjdHMvY29uZmlnLTEiLCJkaWdlc3QiOiJzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsIm1heF9ieXRlcyI6NDA5NiwiZW52ZWxvcGVfa2V5X2lkIjoibGlmZWN5Y2xlLWtleS0xIiwiZXhwaXJlc19hdCI6IjIwMjYtMTAtMDNUMTM6MDA6MDBaIn19",
+    "signing_digest": "sha256:a7543d845979c21c93ebe6fa5ba5ec79563c23346097911f756d890f1be94328"
+  },
+  "request": {
+    "message": {
+      "protocol_version": "compute.v1alpha1",
+      "action": "prepare",
+      "required_capability": "managed-provider-lifecycle-v1",
+      "transaction_id": "transaction-1",
+      "worker_id": "worker-1",
+      "plugin_id": "workflow-plugin-example",
+      "component": "provider-binary",
+      "version": "v1.0.0",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "config_ref": {
+        "protocol_version": "compute.v1alpha1",
+        "transaction_id": "transaction-1",
+        "worker_id": "worker-1",
+        "plugin_id": "workflow-plugin-example",
+        "component": "provider-binary",
+        "component_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "ref": "/api/artifacts/config-1",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "max_bytes": 4096,
+        "envelope_key_id": "lifecycle-key-1",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "r0Fy+6bZXIfLUTSwgQk15GXvkFc4cf+SFadkFBxFnuZTjOO2aVoB3fJj2MJffMhYSEYuYK4YAPdtt0jzxbTFCg=="
+        }
+      },
+      "config_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "secret_refs": [],
+      "prior_state_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expires_at": "2026-10-03T13:00:00Z",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+        "value": "zmguKdF5u+mzwan3Cd8ZFBDRURmP1YvrOyIhWi2Qi8D9QsoyBj3G8Nk0WPKG3L/smjbvPva4GoIFJ/hc3h9jDw=="
+      }
+    },
+    "signing_base64": "eyJkb21haW4iOiJtYW5hZ2VkLXByb3ZpZGVyLWxpZmVjeWNsZS1yZXF1ZXN0LnYxIiwicGF5bG9hZCI6eyJwcm90b2NvbF92ZXJzaW9uIjoiY29tcHV0ZS52MWFscGhhMSIsImFjdGlvbiI6InByZXBhcmUiLCJyZXF1aXJlZF9jYXBhYmlsaXR5IjoibWFuYWdlZC1wcm92aWRlci1saWZlY3ljbGUtdjEiLCJ0cmFuc2FjdGlvbl9pZCI6InRyYW5zYWN0aW9uLTEiLCJ3b3JrZXJfaWQiOiJ3b3JrZXItMSIsInBsdWdpbl9pZCI6IndvcmtmbG93LXBsdWdpbi1leGFtcGxlIiwiY29tcG9uZW50IjoicHJvdmlkZXItYmluYXJ5IiwidmVyc2lvbiI6InYxLjAuMCIsImRpZ2VzdCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwiY29uZmlnX3JlZiI6eyJwcm90b2NvbF92ZXJzaW9uIjoiY29tcHV0ZS52MWFscGhhMSIsInRyYW5zYWN0aW9uX2lkIjoidHJhbnNhY3Rpb24tMSIsIndvcmtlcl9pZCI6Indvcmtlci0xIiwicGx1Z2luX2lkIjoid29ya2Zsb3ctcGx1Z2luLWV4YW1wbGUiLCJjb21wb25lbnQiOiJwcm92aWRlci1iaW5hcnkiLCJjb21wb25lbnRfZGlnZXN0Ijoic2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJyZWYiOiIvYXBpL2FydGlmYWN0cy9jb25maWctMSIsImRpZ2VzdCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwibWF4X2J5dGVzIjo0MDk2LCJlbnZlbG9wZV9rZXlfaWQiOiJsaWZlY3ljbGUta2V5LTEiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0wM1QxMzowMDowMFoiLCJzaWduYXR1cmUiOnsiYWxnb3JpdGhtIjoiZWQyNTUxOSIsImtleV9pZCI6InNoYTI1NjpmZTgxMmMxMmYzYWI0Y2U2YWM1ZGI2OWFjMzUyZjkwNmNiMWIxMWVmNDNmYjMzZTI1MmVmN2ZmNTUyMjYzODg5IiwidmFsdWUiOiJyMEZ5KzZiWlhJZkxVVFN3Z1FrMTVHWHZrRmM0Y2YrU0ZhZGtGQnhGbnVaVGpPTzJhVm9CM2ZKajJNSmZmTWhZU0VZdVlLNFlBUGR0dDBqenhiVEZDZz09In19LCJjb25maWdfaGFzaCI6InNoYTI1NjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwic2VjcmV0X3JlZnMiOltdLCJwcmlvcl9zdGF0ZV9oYXNoIjoic2hhMjU2OmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJleHBpcmVzX2F0IjoiMjAyNi0xMC0wM1QxMzowMDowMFoifX0=",
+    "signing_digest": "sha256:877186e85c723da465724fa14112d268cbbed7b772dfd30cb750b1058356e3f0"
+  },
+  "result": {
+    "message": {
+      "protocol_version": "compute.v1alpha1",
+      "transaction_id": "transaction-1",
+      "worker_id": "worker-1",
+      "plugin_id": "workflow-plugin-example",
+      "component": "provider-binary",
+      "version": "v1.0.0",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "action": "prepare",
+      "request_hash": "sha256:877186e85c723da465724fa14112d268cbbed7b772dfd30cb750b1058356e3f0",
+      "idempotency_state": "prepared",
+      "service_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "state_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "succeeded",
+      "rollback_result": "not-required",
+      "completed_at": "2026-10-03T12:00:00Z",
+      "expires_at": "2026-10-03T13:00:00Z",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+        "value": "S2nktCGjgTK1wNuDcqQJNTPqSNkC13E3u2UKgQAfsbBmzPSbSiqgNp0VqlR29qoh7Xj6oeJu5B7xkY4JY5qvDg=="
+      }
+    },
+    "signing_base64": "eyJkb21haW4iOiJtYW5hZ2VkLXByb3ZpZGVyLWxpZmVjeWNsZS1yZXN1bHQudjEiLCJwYXlsb2FkIjp7InByb3RvY29sX3ZlcnNpb24iOiJjb21wdXRlLnYxYWxwaGExIiwidHJhbnNhY3Rpb25faWQiOiJ0cmFuc2FjdGlvbi0xIiwid29ya2VyX2lkIjoid29ya2VyLTEiLCJwbHVnaW5faWQiOiJ3b3JrZmxvdy1wbHVnaW4tZXhhbXBsZSIsImNvbXBvbmVudCI6InByb3ZpZGVyLWJpbmFyeSIsInZlcnNpb24iOiJ2MS4wLjAiLCJkaWdlc3QiOiJzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsImFjdGlvbiI6InByZXBhcmUiLCJyZXF1ZXN0X2hhc2giOiJzaGEyNTY6ODc3MTg2ZTg1YzcyM2RhNDY1NzI0ZmExNDExMmQyNjhjYmJlZDdiNzcyZGZkMzBjYjc1MGIxMDU4MzU2ZTNmMCIsImlkZW1wb3RlbmN5X3N0YXRlIjoicHJlcGFyZWQiLCJzZXJ2aWNlX2hhc2giOiJzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInN0YXRlX2hhc2giOiJzaGEyNTY6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSIsInN0YXR1cyI6InN1Y2NlZWRlZCIsInJvbGxiYWNrX3Jlc3VsdCI6Im5vdC1yZXF1aXJlZCIsImNvbXBsZXRlZF9hdCI6IjIwMjYtMTAtMDNUMTI6MDA6MDBaIiwiZXhwaXJlc19hdCI6IjIwMjYtMTAtMDNUMTM6MDA6MDBaIn19",
+    "signing_digest": "sha256:196b9332914ea78670f2af054b4c3ca9abade072894f5cbf887eb41718cce8ec"
+  },
+  "preflight": {
+    "protocol_version": "dedicated-provider-host-preflight.v1",
+    "worker_id": "worker-1",
+    "os": "linux",
+    "uid": 1000,
+    "home_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "machine_id_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "agent_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "launcher_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "firewall_policy_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "agent_service_state": "active",
+    "launcher_service_state": "active",
+    "user_bus_available": true,
+    "lingering_enabled": true,
+    "rootless_podman": true,
+    "actions_runner_process_present": false,
+    "actions_runner_service_present": false
+  },
+  "receipt_rejections": [
+    {
+      "name": "substituted-manifest",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "receipt_id": "receipt-1",
+        "challenge": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+        "invite_id": "invite-1",
+        "install_session_id": "session-1",
+        "worker_id": "worker-1",
+        "package_id": "agent-core-linux-amd64",
+        "package_version": "v1.0.0",
+        "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bootstrap_epoch": 1,
+        "package_epoch": 1,
+        "keyset_epoch": 1,
+        "launcher_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "slot_id": "A",
+        "slot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_mode": "systemd-user",
+        "started_pid": 123,
+        "heartbeat_id": "heartbeat-1",
+        "heartbeat_at": "2026-10-03T11:59:00Z",
+        "cloud_final_unit": "cloud-final.service",
+        "scrub_unit": "compute-scrub.service",
+        "wrapper_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scan_hit_count": 0,
+        "code_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "completed_at": "2026-10-03T12:00:00Z",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "XX1mdxdgpDVeIJ8nTFRSCMTmkw9XS6OsW5qoUYYB7Kefe4hi424WpRmSu98hN1V6ImdnXpc32r+aXO1WrJVnAg=="
+        }
+      }
+    },
+    {
+      "name": "replayed-session",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "receipt_id": "receipt-1",
+        "challenge": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+        "invite_id": "invite-1",
+        "install_session_id": "other-session",
+        "worker_id": "worker-1",
+        "package_id": "agent-core-linux-amd64",
+        "package_version": "v1.0.0",
+        "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bootstrap_epoch": 1,
+        "package_epoch": 1,
+        "keyset_epoch": 1,
+        "launcher_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "slot_id": "A",
+        "slot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_mode": "systemd-user",
+        "started_pid": 123,
+        "heartbeat_id": "heartbeat-1",
+        "heartbeat_at": "2026-10-03T11:59:00Z",
+        "cloud_final_unit": "cloud-final.service",
+        "scrub_unit": "compute-scrub.service",
+        "wrapper_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scan_hit_count": 0,
+        "code_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "completed_at": "2026-10-03T12:00:00Z",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "1VfvHGHJ9zFL5Ae36iJCc4nrV5B6RDP6FKyfqNSQ0WSBQpjznINRW6xfzH9Kfd9sp5+0TjAg+1eWqUgm0UQuBA=="
+        }
+      }
+    },
+    {
+      "name": "cross-worker",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "receipt_id": "receipt-1",
+        "challenge": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+        "invite_id": "invite-1",
+        "install_session_id": "session-1",
+        "worker_id": "other-worker",
+        "package_id": "agent-core-linux-amd64",
+        "package_version": "v1.0.0",
+        "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bootstrap_epoch": 1,
+        "package_epoch": 1,
+        "keyset_epoch": 1,
+        "launcher_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "slot_id": "A",
+        "slot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_mode": "systemd-user",
+        "started_pid": 123,
+        "heartbeat_id": "heartbeat-1",
+        "heartbeat_at": "2026-10-03T11:59:00Z",
+        "cloud_final_unit": "cloud-final.service",
+        "scrub_unit": "compute-scrub.service",
+        "wrapper_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scan_hit_count": 0,
+        "code_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "completed_at": "2026-10-03T12:00:00Z",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "S5vUAsDNOVQXmlCQT0CEoFeGayLE8GIabmb7XgIRxwVEoTPQGTyrxfMk5LnIBqoloL1aWTb3fZaUpDa5op0oCw=="
+        }
+      }
+    },
+    {
+      "name": "changed-challenge",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "receipt_id": "receipt-1",
+        "challenge": "CgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgo=",
+        "invite_id": "invite-1",
+        "install_session_id": "session-1",
+        "worker_id": "worker-1",
+        "package_id": "agent-core-linux-amd64",
+        "package_version": "v1.0.0",
+        "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bootstrap_epoch": 1,
+        "package_epoch": 1,
+        "keyset_epoch": 1,
+        "launcher_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "slot_id": "A",
+        "slot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_mode": "systemd-user",
+        "started_pid": 123,
+        "heartbeat_id": "heartbeat-1",
+        "heartbeat_at": "2026-10-03T11:59:00Z",
+        "cloud_final_unit": "cloud-final.service",
+        "scrub_unit": "compute-scrub.service",
+        "wrapper_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scan_hit_count": 0,
+        "code_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "completed_at": "2026-10-03T12:00:00Z",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "7Nmvl/S+CFXA6aZ+twJYN/mJXYLVfm6dD5hnbEkHgGAUUvmI9gwsaCJ3NPOuY8ylHNrYoXUQ7N/lKCDiS4qNBQ=="
+        }
+      }
+    },
+    {
+      "name": "expired",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "receipt_id": "receipt-1",
+        "challenge": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+        "invite_id": "invite-1",
+        "install_session_id": "session-1",
+        "worker_id": "worker-1",
+        "package_id": "agent-core-linux-amd64",
+        "package_version": "v1.0.0",
+        "package_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bootstrap_epoch": 1,
+        "package_epoch": 1,
+        "keyset_epoch": 1,
+        "launcher_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "slot_id": "A",
+        "slot_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_unit_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "service_mode": "systemd-user",
+        "started_pid": 123,
+        "heartbeat_id": "heartbeat-1",
+        "heartbeat_at": "2026-10-03T11:59:00Z",
+        "cloud_final_unit": "cloud-final.service",
+        "scrub_unit": "compute-scrub.service",
+        "wrapper_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "scan_hit_count": 0,
+        "code_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "completed_at": "2026-10-03T11:59:59Z",
+        "expires_at": "2026-10-03T12:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "06PkaiOhDEV/2W6Pie3+QJhpYtfjT7RNhI0wpuVToyK/VcmgjM0qWHiNTAg5c6NDLmdwxq88rOExRyTJSGs6DA=="
+        }
+      }
+    }
+  ],
+  "changed_requests_for_result": [
+    {
+      "name": "prior-state",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "action": "prepare",
+        "required_capability": "managed-provider-lifecycle-v1",
+        "transaction_id": "transaction-1",
+        "worker_id": "worker-1",
+        "plugin_id": "workflow-plugin-example",
+        "component": "provider-binary",
+        "version": "v1.0.0",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "config_ref": {
+          "protocol_version": "compute.v1alpha1",
+          "transaction_id": "transaction-1",
+          "worker_id": "worker-1",
+          "plugin_id": "workflow-plugin-example",
+          "component": "provider-binary",
+          "component_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ref": "/api/artifacts/config-1",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "max_bytes": 4096,
+          "envelope_key_id": "lifecycle-key-1",
+          "expires_at": "2026-10-03T13:00:00Z",
+          "signature": {
+            "algorithm": "ed25519",
+            "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+            "value": "r0Fy+6bZXIfLUTSwgQk15GXvkFc4cf+SFadkFBxFnuZTjOO2aVoB3fJj2MJffMhYSEYuYK4YAPdtt0jzxbTFCg=="
+          }
+        },
+        "config_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "secret_refs": [],
+        "prior_state_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "i5qtQfB4VOxnbDdGtMaQwLS3DPMhLBaQ7OuJNcoU8TTatgadCpW+eFBRnB9ogbu/nC1Mq2nCKxi/SA1O5YN2AA=="
+        }
+      }
+    },
+    {
+      "name": "config-content",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "action": "prepare",
+        "required_capability": "managed-provider-lifecycle-v1",
+        "transaction_id": "transaction-1",
+        "worker_id": "worker-1",
+        "plugin_id": "workflow-plugin-example",
+        "component": "provider-binary",
+        "version": "v1.0.0",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "config_ref": {
+          "protocol_version": "compute.v1alpha1",
+          "transaction_id": "transaction-1",
+          "worker_id": "worker-1",
+          "plugin_id": "workflow-plugin-example",
+          "component": "provider-binary",
+          "component_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ref": "/api/artifacts/config-1",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "max_bytes": 4096,
+          "envelope_key_id": "lifecycle-key-1",
+          "expires_at": "2026-10-03T13:00:00Z",
+          "signature": {
+            "algorithm": "ed25519",
+            "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+            "value": "Nz2rCpGgop8eUszP87H3vhx7R6qshZRHCVqu+X2HIa6RHnAivBDEzTgwvoDCHtWQ1zps7Q/7VTKyc3ltjI5DAQ=="
+          }
+        },
+        "config_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "secret_refs": [],
+        "prior_state_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "km2YrhE7xiKlbSD5MSvSH1BikikFcCM3rd2pPdhPyScUbBMKhylsXbJSf6X2EyiHS+GfVjz+vGTQ79l2y1ndAg=="
+        }
+      }
+    },
+    {
+      "name": "artifact-location",
+      "message": {
+        "protocol_version": "compute.v1alpha1",
+        "action": "prepare",
+        "required_capability": "managed-provider-lifecycle-v1",
+        "transaction_id": "transaction-1",
+        "worker_id": "worker-1",
+        "plugin_id": "workflow-plugin-example",
+        "component": "provider-binary",
+        "version": "v1.0.0",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "config_ref": {
+          "protocol_version": "compute.v1alpha1",
+          "transaction_id": "transaction-1",
+          "worker_id": "worker-1",
+          "plugin_id": "workflow-plugin-example",
+          "component": "provider-binary",
+          "component_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ref": "/api/artifacts/config-2",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "max_bytes": 4096,
+          "envelope_key_id": "lifecycle-key-1",
+          "expires_at": "2026-10-03T13:00:00Z",
+          "signature": {
+            "algorithm": "ed25519",
+            "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+            "value": "LmCHcWJi7Fw5q7rgwuHGL3vKk8X+F9HD/c1otcertGICVSxvlcCt4RK09dsMj0YcivtyAC4c26Pd1bmQMug9Bg=="
+          }
+        },
+        "config_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "secret_refs": [],
+        "prior_state_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expires_at": "2026-10-03T13:00:00Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+          "value": "RQFz5nkxZvEiSeZ/UEDuG+OH9P+UwUsQLsfLwG0xL0szriN9V+g+CdO9WrXM3Omc8Xry+oFcCEgiWx1bt7p9DA=="
+        }
+      }
+    }
+  ]
+}

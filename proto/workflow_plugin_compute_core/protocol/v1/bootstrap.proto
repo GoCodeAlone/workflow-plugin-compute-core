@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package workflow_plugin_compute_core.protocol.v1;
+
+option go_package = "github.com/GoCodeAlone/workflow-plugin-compute-core/protocol/pb;pb";
+
+// Signature-free, domain-bound bytes for the ephemeral install receipt key.
+message AgentSetupInstallReceiptPayload {
+  string domain = 1;
+  string protocol_version = 2;
+  string receipt_id = 3;
+  string challenge = 4;
+  string invite_id = 5;
+  string install_session_id = 6;
+  string worker_id = 7;
+  string package_id = 8;
+  string package_version = 9;
+  string package_digest = 10;
+  string manifest_digest = 11;
+  uint64 bootstrap_epoch = 12;
+  uint64 package_epoch = 13;
+  uint64 keyset_epoch = 14;
+  string launcher_digest = 15;
+  string slot_id = 16;
+  string slot_digest = 17;
+  string service_unit_digest = 18;
+  string service_mode = 19;
+  int64 started_pid = 20;
+  string heartbeat_id = 21;
+  int64 heartbeat_at_unix_nano = 22;
+  string cloud_final_unit = 23;
+  string scrub_unit = 24;
+  string wrapper_hash = 25;
+  uint64 scan_hit_count = 26;
+  string code_digest = 27;
+  int64 completed_at_unix_nano = 28;
+  int64 expires_at_unix_nano = 29;
+}
