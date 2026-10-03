@@ -29,20 +29,30 @@ type recoveryRejection[T any] struct {
 	Message T      `json:"message"`
 }
 
+type packageArtifactVector struct {
+	Name        string                                   `json:"name,omitempty"`
+	Payload     protocol.PackageArtifactSignaturePayload `json:"payload"`
+	TupleJSON   string                                   `json:"tuple_json"`
+	SigningHash string                                   `json:"signing_hash"`
+	Signature   protocol.SignatureEnvelope               `json:"signature"`
+}
+
 type recoveryContractVectors struct {
-	ValidationTime    time.Time                                                     `json:"validation_time"`
-	PublicKey         string                                                        `json:"public_key"`
-	WrongPublicKey    string                                                        `json:"wrong_public_key"`
-	Manifest          recoveryVector[protocol.ComputeBootstrapManifest]             `json:"manifest"`
-	ManifestSignature protocol.SignatureEnvelope                                    `json:"manifest_signature"`
-	Receipt           recoveryVector[protocol.AgentSetupInstallReceipt]             `json:"receipt"`
-	ReceiptBinding    protocol.AgentSetupInstallReceiptBinding                      `json:"receipt_binding"`
-	Artifact          recoveryVector[protocol.ManagedLifecycleArtifactRef]          `json:"artifact"`
-	Request           recoveryVector[protocol.ManagedProviderLifecycleRequest]      `json:"request"`
-	Result            recoveryVector[protocol.ManagedProviderLifecycleResult]       `json:"result"`
-	Preflight         protocol.DedicatedProviderHostPreflightResult                 `json:"preflight"`
-	ReceiptRejections []recoveryRejection[protocol.AgentSetupInstallReceipt]        `json:"receipt_rejections"`
-	ChangedRequests   []recoveryRejection[protocol.ManagedProviderLifecycleRequest] `json:"changed_requests_for_result"`
+	ValidationTime            time.Time                                                     `json:"validation_time"`
+	PublicKey                 string                                                        `json:"public_key"`
+	WrongPublicKey            string                                                        `json:"wrong_public_key"`
+	Manifest                  recoveryVector[protocol.ComputeBootstrapManifest]             `json:"manifest"`
+	ManifestSignature         protocol.SignatureEnvelope                                    `json:"manifest_signature"`
+	Receipt                   recoveryVector[protocol.AgentSetupInstallReceipt]             `json:"receipt"`
+	ReceiptBinding            protocol.AgentSetupInstallReceiptBinding                      `json:"receipt_binding"`
+	Artifact                  recoveryVector[protocol.ManagedLifecycleArtifactRef]          `json:"artifact"`
+	Request                   recoveryVector[protocol.ManagedProviderLifecycleRequest]      `json:"request"`
+	Result                    recoveryVector[protocol.ManagedProviderLifecycleResult]       `json:"result"`
+	Preflight                 protocol.DedicatedProviderHostPreflightResult                 `json:"preflight"`
+	ReceiptRejections         []recoveryRejection[protocol.AgentSetupInstallReceipt]        `json:"receipt_rejections"`
+	ChangedRequests           []recoveryRejection[protocol.ManagedProviderLifecycleRequest] `json:"changed_requests_for_result"`
+	PackageArtifacts          []packageArtifactVector                                       `json:"package_artifacts"`
+	PackageArtifactRejections []packageArtifactVector                                       `json:"package_artifact_rejections"`
 }
 
 func makeRecoveryVector[T any](message T, signing []byte) recoveryVector[T] {
@@ -153,6 +163,38 @@ func exportedRecoveryVectors(t *testing.T) recoveryContractVectors {
 		}
 		vectors.ChangedRequests = append(vectors.ChangedRequests, recoveryRejection[protocol.ManagedProviderLifecycleRequest]{Name: mutation.name, Message: changed})
 	}
+	for _, payload := range []protocol.PackageArtifactSignaturePayload{
+		packageArtifactFixture(),
+		{Component: "provider", PluginID: "workflow-plugin-example", Version: "v1.2.3", URL: "https://packages.example.test/immutable/a%2Fb?platform=linux&arch=amd64", SHA256: recoveryDigest()},
+	} {
+		data, err := json.Marshal(existingPackageTuple(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		vectors.PackageArtifacts = append(vectors.PackageArtifacts, packageArtifactVector{
+			Payload: payload, TupleJSON: string(data), SigningHash: protocol.CanonicalHash(existingPackageTuple(payload)), Signature: existingPackageSignature(payload),
+		})
+	}
+	for _, mutation := range []struct {
+		name  string
+		apply func(*packageArtifactVector)
+	}{
+		{"component", func(v *packageArtifactVector) { v.Payload.Component = "provider" }},
+		{"plugin", func(v *packageArtifactVector) { v.Payload.PluginID = "workflow-plugin-other" }},
+		{"version", func(v *packageArtifactVector) { v.Payload.Version = "v1.0.1" }},
+		{"url", func(v *packageArtifactVector) { v.Payload.URL += "?substituted" }},
+		{"sha256", func(v *packageArtifactVector) { v.Payload.SHA256 = "sha256:" + strings.Repeat("b", 64) }},
+		{"algorithm", func(v *packageArtifactVector) { v.Signature.Algorithm = "rsa" }},
+		{"untrusted-key", func(v *packageArtifactVector) { v.Signature.KeyID = "other-key" }},
+		{"raw-json-domain", func(v *packageArtifactVector) {
+			v.Signature.Value = base64.StdEncoding.EncodeToString(ed25519.Sign(key, []byte(v.TupleJSON)))
+		}},
+	} {
+		changed := vectors.PackageArtifacts[0]
+		changed.Name = mutation.name
+		mutation.apply(&changed)
+		vectors.PackageArtifactRejections = append(vectors.PackageArtifactRejections, changed)
+	}
 	return vectors
 }
 
@@ -224,6 +266,27 @@ func TestRecoveryContractVectors_SharedConsumerBytes(t *testing.T) {
 		}
 		if err := consumer.Result.Message.Verify(public, vector.Message, consumer.ValidationTime); err == nil {
 			t.Fatalf("shared changed-request result replay accepted: %s", vector.Name)
+		}
+	}
+	keys := map[string]ed25519.PublicKey{"artifact-key": public}
+	for _, vector := range consumer.PackageArtifacts {
+		data, err := json.Marshal(vector.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != vector.TupleJSON || string(vector.Payload.SigningBytes()) != vector.SigningHash {
+			t.Fatal("shared package tuple JSON/hash changed")
+		}
+		if err := vector.Payload.Verify(vector.Signature, keys); err != nil {
+			t.Fatal(err)
+		}
+		if err := vector.Payload.Verify(vector.Signature, map[string]ed25519.PublicKey{"artifact-key": wrongPublic}); err == nil {
+			t.Fatal("shared package wrong-key vector accepted")
+		}
+	}
+	for _, vector := range consumer.PackageArtifactRejections {
+		if err := vector.Payload.Verify(vector.Signature, keys); err == nil {
+			t.Fatalf("shared package rejection accepted: %s", vector.Name)
 		}
 	}
 }

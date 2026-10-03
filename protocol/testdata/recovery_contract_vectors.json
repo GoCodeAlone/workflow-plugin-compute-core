@@ -529,5 +529,169 @@
         }
       }
     }
+  ],
+  "package_artifacts": [
+    {
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "payload": {
+        "component": "provider",
+        "plugin_id": "workflow-plugin-example",
+        "version": "v1.2.3",
+        "url": "https://packages.example.test/immutable/a%2Fb?platform=linux\u0026arch=amd64",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"provider\",\"plugin_id\":\"workflow-plugin-example\",\"version\":\"v1.2.3\",\"url\":\"https://packages.example.test/immutable/a%2Fb?platform=linux\\u0026arch=amd64\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:3e5eccb7eb149d41e4fd631e23af1b2dfacf41c08bfeeed5ed527190c1080513",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "0LJrA/KbSpUrWf9LFQIbG/ovr9XVU2ezrJdZN8ps6wOVUS5Zbmyhbi5qDATmueQ9qYtEJeux+N1KRD+Y2YHnAQ=="
+      }
+    }
+  ],
+  "package_artifact_rejections": [
+    {
+      "name": "component",
+      "payload": {
+        "component": "provider",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "plugin",
+      "payload": {
+        "component": "agent-core",
+        "plugin_id": "workflow-plugin-other",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "version",
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.1",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "url",
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz?substituted",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "sha256",
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "algorithm",
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "rsa",
+        "key_id": "artifact-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "untrusted-key",
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "other-key",
+        "value": "kkr5+GLTkEDbTK8e2b608qIrRKLg+4U1fdyx7YLQ1ZWkzSTcgQDEMGgCOESWtylqt+YpTNSL7jH3h4Ozvj2zAg=="
+      }
+    },
+    {
+      "name": "raw-json-domain",
+      "payload": {
+        "component": "agent-core",
+        "version": "v1.0.0",
+        "url": "/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "tuple_json": "{\"component\":\"agent-core\",\"version\":\"v1.0.0\",\"url\":\"/v1/agent-artifacts/agent-core/agent-linux-amd64.tar.gz\",\"sha256\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "signing_hash": "sha256:017b032c0836bba65a1c23e89630203ec47ebb9af4e930deeda02aa9b9d3ad9c",
+      "signature": {
+        "algorithm": "ed25519",
+        "key_id": "artifact-key",
+        "value": "TS/W3qxTlN4gaj8h9L5yu+C3z5EYFd20tuKa6EvPbQFxq01wUXbZiShTdstm4DoT4Nk53v5FBTqapfPcvxYCCQ=="
+      }
+    }
   ]
 }
